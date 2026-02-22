@@ -1,48 +1,21 @@
-services:
-  - type: web
-    name: wb-price-bot
-    runtime: python
-    plan: free
-    buildCommand: |
-      # 1. Обновляем pip и устанавливаем Python-пакеты
+buildCommand: |
+      # 1. Базовые обновления и установка Python-пакетов
       pip install --upgrade pip
       pip install -r requirements.txt
 
-
-      # 2. Устанавливаем Playwright и браузеры, указывая путь для кэша
-      export PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/.cache/ms-playwright
-      pip install playwright
-      playwright install chromium
-
-
-      # 3. Критически важный шаг: устанавливаем системные библиотеки через apt-get
-      #    На этапе сборки Render имеет для этого все права.
+      # 2. Критически важно: Устанавливаем системные зависимости ДО Playwright
       apt-get update
       apt-get install -y --no-install-recommends \
-        libnss3 \
-        libnspr4 \
-        libatk-bridge2.0-0 \
-        libatk1.0-0 \
-        libx11-6 \
-        libxcomposite1 \
-        libxdamage1 \
-        libxext6 \
-        libxfixes3 \
-        libxrandr2 \
-        libgbm1 \
-        libxkbcommon0 \
-        libpango-1.0-0 \
-        libcairo2 \
-        libasound2 \
-        libatspi2.0-0 \
-        libwayland-client0 \
-        libwayland-egl1
-      # Очищаем кэш apt, чтобы не раздувать образ
+        libnss3 libnspr4 libatk-bridge2.0-0 libatk1.0-0 libx11-6 \
+        libxcomposite1 libxdamage1 libxext6 libxfixes3 libxrandr2 \
+        libgbm1 libxkbcommon0 libpango-1.0-0 libcairo2 libasound2 \
+        libatspi2.0-0 libwayland-client0 libwayland-egl1
       rm -rf /var/lib/apt/lists/*
-    startCommand: python bot.py
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.9
-      - key: PLAYWRIGHT_BROWSERS_PATH
-        value: /opt/render/project/.cache/ms-playwright
 
+      # 3. Устанавливаем Playwright и браузеры, полностью контролируя процесс
+      #    Переменная окружения задаётся прямо перед командой
+      PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/.cache/ms-playwright pip install playwright
+      PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/.cache/ms-playwright playwright install chromium
+
+      # 4. Важно: НЕ вызываем playwright install-deps. Зависимости уже установлены через apt-get.
+      echo "Системные зависимости установлены через apt-get, пропускаем playwright install-deps."
