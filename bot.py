@@ -195,14 +195,14 @@ def get_nm_id(url: str):
 
 
 async def get_product_price_with_availability(url: str):
-    """Получает цену товара через API Wildberries с реальными куками"""
+    """Получает цену product (со скидкой продавца) из API Wildberries"""
     nm_id = get_nm_id(url)
     if not nm_id:
         logger.error(f"❌ Не удалось извлечь артикул из URL: {url}")
         return None, None, False
 
 
-    # Ваши куки из примера
+    # Ваши куки и заголовки (оставляем без изменений)
     cookies = {
         '_wbauid': '9117851341767702431',
         'x_wbaas_token': '1.1000.d1627711296f44628e9eca5a71ec989a.MHwxOTMuMTQzLjY3LjE1N3xNb3ppbGxhLzUuMCAoV2luZG93cyBOVCAxMC4wOyBXaW42NDsgeDY0KSBBcHBsZVdlYktpdC81MzcuMzYgKEtIVE1MLCBsaWtlIEdlY2tvKSBDaHJvbWUvMTQ0LjAuMC4wIFNhZmFyaS81MzcuMzZ8MTc3Mjc4NDQ3NXxyZXVzYWJsZXwyfGV5Sm9ZWE5vSWpvaUluMD18MHwzfDE3NzIxNzk2NzV8MQ==.MEUCIAZ3de8sle97/Qv63oxkMw4cKhXnp/0jH0C5g+VoqUiqAiEAmUkVA1jsg7Avnx+BzXZZFs3YO0lAJsB1f6AQy4MJNoA=',
@@ -217,7 +217,6 @@ async def get_product_price_with_availability(url: str):
     }
 
 
-    # Ваши заголовки из примера
     headers = {
         'accept': '*/*',
         'accept-language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -269,8 +268,8 @@ async def get_product_price_with_availability(url: str):
         product = data["products"][0]
         logger.info(f"📦 Найден товар: {product.get('name', 'Unknown')}")
         
-        # Ищем цену
-        price = None
+        # Извлекаем ТОЛЬКО цену product (скидка продавца)
+        product_price = None
         
         if "sizes" in product and len(product["sizes"]) > 0:
             size = product["sizes"][0]
@@ -278,20 +277,17 @@ async def get_product_price_with_availability(url: str):
                 price_data = size["price"]
                 logger.info(f"💰 Данные о цене: {price_data}")
                 
-                # Пробуем все варианты цен
+                # Нам нужна только цена 'product' (в копейках)
                 if "product" in price_data and price_data["product"] > 0:
-                    price = price_data["product"] / 100
-                    logger.info(f"✅ Найдена цена product: {price} ₽")
-                elif "basic" in price_data and price_data["basic"] > 0:
-                    price = price_data["basic"] / 100
-                    logger.info(f"✅ Найдена цена basic: {price} ₽")
-                elif "total" in price_data and price_data["total"] > 0:
-                    price = price_data["total"] / 100
-                    logger.info(f"✅ Найдена цена total: {price} ₽")
+                    # Конвертируем из копеек в рубли
+                    product_price = Decimal(price_data["product"]) / Decimal(100)
+                    logger.info(f"✅ Найдена цена product (со скидкой продавца): {product_price} ₽")
+                else:
+                    logger.warning(f"⚠️ Цена product не найдена в ответе")
         
-        if price and price > 0:
-            logger.info(f"✅ Товар {nm_id} в наличии, цена: {price} ₽")
-            return Decimal(str(price)), nm_id, True
+        if product_price and product_price > 0:
+            # Возвращаем ТОЛЬКО цену product
+            return product_price, nm_id, True
         else:
             logger.warning(f"⚠️ Товар {nm_id} есть, но цена не найдена")
             return None, nm_id, True
