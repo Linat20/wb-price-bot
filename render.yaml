@@ -4,12 +4,18 @@ services:
     runtime: python
     plan: free
     buildCommand: |
+      # 1. Обновляем pip и устанавливаем Python-пакеты
       pip install --upgrade pip
       pip install -r requirements.txt
+
+      # 2. Устанавливаем Playwright и браузеры в папку проекта
       PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/.cache/ms-playwright pip install playwright
       PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/.cache/ms-playwright playwright install chromium
-      # Устанавливаем зависимости без sudo, используя apt-get напрямую
-      apt-get update && apt-get install -y \
+
+      # 3. Устанавливаем системные библиотеки, необходимые для работы Chromium.
+      #    Это безопасный способ, не требующий прав root, так как Render и так работает под root на этапе сборки.
+      apt-get update
+      apt-get install -y --no-install-recommends \
         libnss3 \
         libnspr4 \
         libatk-bridge2.0-0 \
@@ -24,7 +30,12 @@ services:
         libxkbcommon0 \
         libpango-1.0-0 \
         libcairo2 \
-        libasound2
+        libasound2 \
+        libatspi2.0-0 \
+        libwayland-client0 \
+        libwayland-egl1
+      # Удаляем кэш apt для уменьшения размера образа
+      rm -rf /var/lib/apt/lists/*
     startCommand: python bot.py
     envVars:
       - key: PYTHON_VERSION
