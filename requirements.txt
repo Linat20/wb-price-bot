@@ -2,3 +2,4 @@ aiogram==2.25.1
 loguru==0.7.2
 requests==2.31.0
 playwright==1.40.0
+aiohttp==3.8.6

@@ -1,4 +1,6 @@
 ﻿# -*- coding: utf-8 -*-
+import os
+from aiohttp import web
 import asyncio
 import re
 import json
@@ -1193,7 +1195,30 @@ async def process_callback_track(callback_query: types.CallbackQuery):
             "❌ Ошибка при добавлении",
             show_alert=True
         )
+        
+# --- Добавьте эти функции перед on_startup ---
+async def handle(request):
+    return web.Response(text="🤖 WB Price Bot is running!\n\n✅ Bot is active and working correctly.")
 
+async def start_http_server():
+    app = web.Application()
+    app.router.add_get('/', handle)
+    
+    port = int(os.environ.get('PORT', 10000))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    logger.info(f"🌐 HTTP сервер запущен на порту {port}")
+
+# --- Обновите on_startup ---
+async def on_startup(dp):
+    asyncio.create_task(check_prices())
+    asyncio.create_task(start_http_server())  # Добавьте эту строку
+    logger.info("=" * 50)
+    logger.info("🚀 БОТ УСПЕШНО ЗАПУЩЕН!")
+    logger.info("=" * 50)
+    
 # --- Запуск ---
 async def on_startup(dp):
     asyncio.create_task(check_prices())
