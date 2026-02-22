@@ -4,8 +4,12 @@ services:
     runtime: python
     plan: free
     buildCommand: |
+      python -V
+      pip install --upgrade pip
       pip install -r requirements.txt
-      pip install playwright
       playwright install chromium
       playwright install-deps
     startCommand: python bot.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
