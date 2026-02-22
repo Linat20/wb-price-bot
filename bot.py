@@ -1,5 +1,6 @@
 ﻿# -*- coding: utf-8 -*-
 import os
+import random
 from aiohttp import web
 import asyncio
 import re
@@ -162,26 +163,23 @@ def get_nm_id(url: str):
         return match.group(1)
     return None
 
-# --- Диагностическая версия функции для Docker ---
+# --- Исправленная функция с правильными заголовками ---
 async def get_product_price_with_availability(url: str):
-    """Возвращает (цена, nm_id, есть_в_наличии) - с подробным логированием"""
+    """Возвращает (цена, nm_id, есть_в_наличии) - исправлено для Wildberries"""
     nm_id = get_nm_id(url)
     if not nm_id:
-        logger.error(f"❌ Не удалось извлечь NM_ID из URL: {url}")
         return None, None, False
 
 
-    logger.info(f"🔍 Начинаю проверку товара {nm_id}")
+    # Добавляем случайную задержку чтобы не выглядеть как бот
+    await asyncio.sleep(1)
     
     api_url = f"https://www.wildberries.ru/__internal/u-card/cards/v4/detail?appType=1&curr=rub&dest=-284542&spp=30&hide_vflags=4294967296&ab_testing=false&lang=ru&nm={nm_id}"
-    logger.info(f"🌐 API URL: {api_url}")
 
 
     try:
-        logger.info("🚀 Запуск Playwright...")
         async with async_playwright() as p:
-            logger.info("✅ Playwright запущен, запускаю браузер...")
-            
+            # Запускаем браузер с максимальной эмуляцией реального пользователя
             browser = await p.chromium.launch(
                 headless=True,
                 args=[
@@ -189,114 +187,108 @@ async def get_product_price_with_availability(url: str):
                     '--disable-setuid-sandbox',
                     '--disable-dev-shm-usage',
                     '--disable-accelerated-2d-canvas',
-                    '--disable-gpu'
+                    '--disable-gpu',
+                    '--window-size=1920,1080',
+                    '--lang=ru'
                 ]
             )
-            logger.info("✅ Браузер запущен")
             
+            # Создаем контекст с полной эмуляцией
             context = await browser.new_context(
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                viewport={'width': 1920, 'height': 1080},
+                locale='ru-RU',
+                timezone_id='Europe/Moscow'
             )
-            logger.info("✅ Контекст создан")
             
             page = await context.new_page()
-            logger.info("✅ Страница создана")
             
+            # Устанавливаем заголовки как у реального браузера
             await page.set_extra_http_headers({
-                "Accept": "application/json, text/plain, */*",
-                "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-                "Referer": "https://www.wildberries.ru/",
-                "Origin": "https://www.wildberries.ru",
+                'Accept': 'application/json, text/plain, */*',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'Pragma': 'no-cache',
+                'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"Windows"',
+                'Sec-Fetch-Dest': 'empty',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Site': 'same-origin',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'X-Requested-With': 'XMLHttpRequest'
             })
-            logger.info("✅ Заголовки установлены")
             
-            logger.info(f"📡 Отправляю запрос к API...")
-            response = await page.goto(api_url, wait_until="networkidle", timeout=30000)
+            # Добавляем случайную задержку перед запросом
+            await asyncio.sleep(random.uniform(1, 3))
             
-            status_code = response.status
-            logger.info(f"📊 Статус ответа: {status_code}")
+            response = await page.goto(api_url, wait_until="networkidle", timeout=45000)
             
-            if status_code != 200:
-                logger.error(f"❌ API вернул статус {status_code}")
+            if response.status != 200:
+                logger.error(f"Ошибка HTTP {response.status} для товара {nm_id}")
                 await browser.close()
                 return None, nm_id, False
             
             text = await response.text()
-            logger.info(f"📦 Получен ответ, размер: {len(text)} символов")
-            logger.info(f"📝 Первые 500 символов ответа: {text[:500]}")
             
-            try:
-                data = json.loads(text)
-                logger.info("✅ JSON распарсен успешно")
-            except json.JSONDecodeError as e:
-                logger.error(f"❌ Ошибка парсинга JSON: {e}")
+            # Проверяем, не пустой ли ответ
+            if not text or len(text) < 10:
+                logger.error(f"Пустой ответ для товара {nm_id}")
                 await browser.close()
                 return None, nm_id, False
             
+            data = json.loads(text)
             await browser.close()
-            logger.info("✅ Браузер закрыт")
         
-        # Проверяем структуру ответа
-        logger.info(f"🔍 Ключи в ответе: {list(data.keys())}")
-        
-        if not data.get("products"):
-            logger.error(f"❌ В ответе нет поля 'products'")
+        # Проверяем наличие товара
+        if not data.get("products") or len(data["products"]) == 0:
+            logger.info(f"Товар {nm_id} отсутствует в наличии")
             return None, nm_id, False
         
-        if len(data["products"]) == 0:
-            logger.error(f"❌ Массив products пуст")
-            return None, nm_id, False
-        
-        product = data["products"][0]
-        logger.info(f"📦 Информация о товаре: {list(product.keys())}")
-        
-        # Проверяем наличие цены
+        # Парсим цену
         try:
+            product = data["products"][0]
+            
+            # Пробуем разные пути к цене
+            price = None
+            
+            # Путь 1: через sizes
             if "sizes" in product and len(product["sizes"]) > 0:
-                logger.info(f"📏 Найдено размеров: {len(product['sizes'])}")
                 size = product["sizes"][0]
-                
                 if "price" in size:
                     price_data = size["price"]
-                    logger.info(f"💰 Данные о цене: {price_data}")
-                    
-                    # Пробуем получить обычную цену
-                    if "product" in price_data:
-                        product_price_cop = price_data["product"]
-                        logger.info(f"💰 Цена в копейках (product): {product_price_cop}")
-                        
-                        if product_price_cop > 0:
-                            product_price = Decimal(product_price_cop) / Decimal(100)
-                            logger.info(f"✅ Товар {nm_id} в наличии, цена: {product_price} ₽")
-                            return product_price, nm_id, True
-                    
-                    # Пробуем получить цену с кошельком
-                    if "wallet" in price_data:
-                        wallet_price_cop = price_data["wallet"]
-                        logger.info(f"💰 Цена в копейках (wallet): {wallet_price_cop}")
-                        
-                        if wallet_price_cop > 0:
-                            wallet_price = Decimal(wallet_price_cop) / Decimal(100)
-                            logger.info(f"✅ Товар {nm_id} в наличии, цена с кошельком: {wallet_price} ₽")
-                            return wallet_price, nm_id, True
-                else:
-                    logger.warning(f"⚠️ В размере нет поля 'price'")
+                    # Пробуем product цену
+                    if "product" in price_data and price_data["product"] > 0:
+                        price = Decimal(price_data["product"]) / Decimal(100)
+                    # Пробуем wallet цену
+                    elif "wallet" in price_data and price_data["wallet"] > 0:
+                        price = Decimal(price_data["wallet"]) / Decimal(100)
+            
+            # Путь 2: прямая цена в товаре
+            if not price and "price" in product:
+                if isinstance(product["price"], dict):
+                    if "product" in product["price"]:
+                        price = Decimal(product["price"]["product"]) / Decimal(100)
+                elif isinstance(product["price"], (int, float)):
+                    price = Decimal(product["price"]) / Decimal(100)
+            
+            if price and price > 0:
+                logger.info(f"✅ Товар {nm_id} в наличии, цена: {price} ₽")
+                return price, nm_id, True
             else:
-                logger.warning(f"⚠️ В товаре нет размеров или sizes пуст")
-            
-            # Если не нашли цену, но товар есть
-            logger.info(f"⚠️ Товар {nm_id} есть в каталоге, но цена не определена")
-            return None, nm_id, True
-            
-        except (KeyError, IndexError) as e:
-            logger.error(f"❌ Ошибка при парсинге цены: {e}")
+                logger.info(f"⚠️ Товар {nm_id} есть, но цена не определена")
+                return None, nm_id, True
+                
+        except Exception as e:
+            logger.error(f"Ошибка парсинга цены: {e}")
             return None, nm_id, False
             
     except Exception as e:
-        logger.error(f"❌ Критическая ошибка: {type(e).__name__}: {e}")
-        import traceback
-        logger.error(f"📚 Traceback: {traceback.format_exc()}")
+        logger.error(f"Критическая ошибка: {e}")
         return None, nm_id, False
+
 
 
 
