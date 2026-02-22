@@ -1,12 +1,10 @@
 ﻿# -*- coding: utf-8 -*-
 import asyncio
-import random
 import re
 import json
 import requests
 import sqlite3
 import datetime
-import random
 from decimal import Decimal, ROUND_FLOOR
 from loguru import logger
 from aiogram import Bot, Dispatcher, types
@@ -14,11 +12,9 @@ from aiogram.utils import executor
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 
-TOKEN = "8546428848:AAHrGEdOQWDAUPWwIGajy3qfUaZbZ0VnwuQ"
+TOKEN = "8546428848:AAFnTtzk6NMI6X7QbfyXd1YIwpuMnIoWeis"
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
-
-
 
 
 # --- Функция для конвертации времени в UTC+5 ---
@@ -30,8 +26,6 @@ def to_local_time(utc_time_str):
         return local_time
     except:
         return datetime.datetime.now()
-
-
 
 
 # --- Инициализация базы данных ---
@@ -80,8 +74,6 @@ def init_db():
     conn.close()
 
 
-
-
 # --- Функция для обновления структуры БД ---
 def update_db_for_availability():
     """Обновляет структуру базы данных для отслеживания наличия товара"""
@@ -110,69 +102,27 @@ def update_db_for_availability():
         logger.error(f"Ошибка при обновлении БД: {e}")
 
 
-
-
 # Инициализация БД
 init_db()
 update_db_for_availability()
 
 
-
-
-# --- WB Wallet URLs ---
-DEFAULT_PAYMENT_URL = "https://static-basket-01.wbbasket.ru/vol1/global-payment/default-payment.json"
-
-
-
-
-# --- Получение скидки для кошелька ---
-def get_wallet_discount() -> dict:
-    """Возвращает словарь со скидками для разных типов кошелька"""
-    try:
-        resp = requests.get(DEFAULT_PAYMENT_URL, timeout=5)
-        resp.raise_for_status()
-        payload = resp.json()
-    except Exception:
-        return {"anon": 0, "auth": 0}
-
-
-    if payload.get("state") != 0:
-        return {"anon": 0, "auth": 0}
-
-
-    discounts = {"anon": 0, "auth": 0}
-    
-    for item in payload.get("data", []):
-        if item.get("is_active"):
-            if item.get("wc_type") == "Незалогиненный кошелёк":
-                try:
-                    discounts["anon"] = Decimal(item["discount_value"])
-                except:
-                    pass
-            elif item.get("wc_type") == "ВБ Клуб Аноним кошелёк":
-                try:
-                    discounts["auth"] = Decimal(item["discount_value"])
-                except:
-                    pass
-    
-    logger.info(f"Получены скидки: незалогиненный - {discounts['anon']}%, ВБ Клуб - {discounts['auth']}%")
-    return discounts
-
-
-
-
-def calc_price_with_wallet(price: Decimal, discount_percent: Decimal) -> int:
-    """Рассчитывает цену с учетом скидки"""
-    if discount_percent <= 0:
+# --- Функция расчета цены с ВБ Кошельком (фиксированная скидка 3%) ---
+def calc_price_with_wallet(price: Decimal) -> int:
+    """
+    Рассчитывает цену с ВБ Кошельком (скидка 3%)
+    """
+    if price <= 0:
         return int(price)
+    
+    # Фиксированная скидка 3%
+    discount_percent = Decimal("3")
     
     discounted_price = (
         price * (Decimal("100") - discount_percent) / Decimal("100")
     ).quantize(Decimal("1"), rounding=ROUND_FLOOR)
     
     return int(discounted_price)
-
-
 
 
 # --- Извлечение NM ID из ссылки ---
@@ -192,17 +142,16 @@ def get_nm_id(url: str):
     return None
 
 
-
-
+# --- Получение цены product через API Wildberries ---
 async def get_product_price_with_availability(url: str):
-    """Получает цену product (со скидкой продавца) из API Wildberries"""
+    """Получает цену товара, перебирая все размеры пока не найдет цену"""
     nm_id = get_nm_id(url)
     if not nm_id:
         logger.error(f"❌ Не удалось извлечь артикул из URL: {url}")
         return None, None, False
 
 
-    # Ваши куки и заголовки (оставляем без изменений)
+    # Куки авторизации (ваши данные)
     cookies = {
         '_wbauid': '9117851341767702431',
         'x_wbaas_token': '1.1000.d1627711296f44628e9eca5a71ec989a.MHwxOTMuMTQzLjY3LjE1N3xNb3ppbGxhLzUuMCAoV2luZG93cyBOVCAxMC4wOyBXaW42NDsgeDY0KSBBcHBsZVdlYktpdC81MzcuMzYgKEtIVE1MLCBsaWtlIEdlY2tvKSBDaHJvbWUvMTQ0LjAuMC4wIFNhZmFyaS81MzcuMzZ8MTc3Mjc4NDQ3NXxyZXVzYWJsZXwyfGV5Sm9ZWE5vSWpvaUluMD18MHwzfDE3NzIxNzk2NzV8MQ==.MEUCIAZ3de8sle97/Qv63oxkMw4cKhXnp/0jH0C5g+VoqUiqAiEAmUkVA1jsg7Avnx+BzXZZFs3YO0lAJsB1f6AQy4MJNoA=',
@@ -236,14 +185,12 @@ async def get_product_price_with_availability(url: str):
     }
 
 
-    # Формируем URL для одного товара
-    api_url = f"https://www.wildberries.ru/__internal/card/cards/v4/detail?appType=1&curr=rub&dest=-284542&spp=30&hide_vflags=4294967296&ab_testing=false&lang=ru&nm={nm_id}"
+    api_url = f"https://www.wildberries.ru/__internal/card/cards/v4/detail?appType=1&curr=rub&dest=-5543645&spp=30&hide_vflags=4294967296&ab_testing=false&lang=ru&nm={nm_id}"
 
 
     try:
         logger.info(f"🔍 Запрос к API: {api_url}")
         
-        # Используем session для сохранения кук
         session = requests.Session()
         session.cookies.update(cookies)
         session.headers.update(headers)
@@ -254,43 +201,48 @@ async def get_product_price_with_availability(url: str):
         
         if response.status_code != 200:
             logger.error(f"❌ Ошибка HTTP {response.status_code}")
-            if response.text:
-                logger.debug(f"Ответ: {response.text[:200]}")
             return None, nm_id, False
             
         data = response.json()
         
-        # Проверяем наличие товара
         if not data.get("products") or len(data["products"]) == 0:
-            logger.info(f"❌ Товар {nm_id} не найден")
+            logger.info(f"❌ Товар {nm_id} не найден в каталоге")
             return None, nm_id, False
         
         product = data["products"][0]
         logger.info(f"📦 Найден товар: {product.get('name', 'Unknown')}")
         
-        # Извлекаем ТОЛЬКО цену product (скидка продавца)
-        product_price = None
+        # Проверяем наличие sizes
+        if "sizes" not in product or len(product["sizes"]) == 0:
+            logger.warning(f"⚠️ У товара {nm_id} нет размеров")
+            return None, nm_id, True  # Товар есть, но без размеров
         
-        if "sizes" in product and len(product["sizes"]) > 0:
-            size = product["sizes"][0]
-            if "price" in size:
-                price_data = size["price"]
-                logger.info(f"💰 Данные о цене: {price_data}")
-                
-                # Нам нужна только цена 'product' (в копейках)
-                if "product" in price_data and price_data["product"] > 0:
-                    # Конвертируем из копеек в рубли
-                    product_price = Decimal(price_data["product"]) / Decimal(100)
-                    logger.info(f"✅ Найдена цена product (со скидкой продавца): {product_price} ₽")
-                else:
-                    logger.warning(f"⚠️ Цена product не найдена в ответе")
+        # ПЕРЕБИРАЕМ ВСЕ РАЗМЕРЫ ПО ПОРЯДКУ
+        max_sizes_to_check = min(15, len(product["sizes"]))  # Не больше 15 попыток
+        logger.info(f"📏 Всего размеров: {len(product['sizes'])}, проверим первые {max_sizes_to_check}")
         
-        if product_price and product_price > 0:
-            # Возвращаем ТОЛЬКО цену product
-            return product_price, nm_id, True
-        else:
-            logger.warning(f"⚠️ Товар {nm_id} есть, но цена не найдена")
-            return None, nm_id, True
+        for i in range(max_sizes_to_check):
+            size = product["sizes"][i]
+            logger.info(f"   Проверяем размер {i+1}/{max_sizes_to_check}")
+            
+            if "price" not in size:
+                logger.info(f"   ➖ Размер {i+1}: нет price, пропускаем")
+                continue
+            
+            price_data = size["price"]
+            logger.info(f"   💰 Данные о цене размера {i+1}: {price_data}")
+            
+            # Ищем цену product
+            if "product" in price_data and price_data["product"] > 0:
+                product_price = Decimal(price_data["product"]) / Decimal(100)
+                logger.info(f"✅ НАШЛИ ЦЕНУ! Размер {i+1}: {product_price} ₽")
+                return product_price, nm_id, True
+            else:
+                logger.info(f"   ➖ Размер {i+1}: нет поля product или цена 0")
+        
+        # Если перебрали все размеры и не нашли цену
+        logger.warning(f"⚠️ Товар {nm_id} есть, но ни в одном размере не найдена цена")
+        return None, nm_id, True  # Товар есть, но все размеры без цены (возможно, всё распродано)
             
     except Exception as e:
         logger.error(f"❌ Ошибка при проверке товара {nm_id}: {type(e).__name__}: {e}")
@@ -298,10 +250,7 @@ async def get_product_price_with_availability(url: str):
 
 
 
-
-
-
-# --- Функции для работы с БД ---
+# --- Функции для работы с БД (без изменений) ---
 def add_to_tracking(user_id: int, nm_id: str, url: str, price: Decimal, is_available: bool = True):
     conn = sqlite3.connect('price_tracking.db')
     cursor = conn.cursor()
@@ -321,8 +270,6 @@ def add_to_tracking(user_id: int, nm_id: str, url: str, price: Decimal, is_avail
     conn.close()
 
 
-
-
 def remove_from_tracking(user_id: int, nm_id: str):
     conn = sqlite3.connect('price_tracking.db')
     cursor = conn.cursor()
@@ -335,8 +282,6 @@ def remove_from_tracking(user_id: int, nm_id: str):
     
     conn.commit()
     conn.close()
-
-
 
 
 def get_user_tracked_items(user_id: int):
@@ -355,8 +300,6 @@ def get_user_tracked_items(user_id: int):
     return items
 
 
-
-
 def get_all_tracked_items():
     conn = sqlite3.connect('price_tracking.db')
     cursor = conn.cursor()
@@ -370,8 +313,6 @@ def get_all_tracked_items():
     items = cursor.fetchall()
     conn.close()
     return items
-
-
 
 
 def update_price(nm_id: str, new_price: Decimal):
@@ -393,8 +334,6 @@ def update_price(nm_id: str, new_price: Decimal):
     conn.close()
 
 
-
-
 def get_price_history(nm_id: str, days: int = 7):
     conn = sqlite3.connect('price_tracking.db')
     cursor = conn.cursor()
@@ -411,10 +350,7 @@ def get_price_history(nm_id: str, days: int = 7):
     return history
 
 
-
-
 def update_product_availability(nm_id: str, is_available: bool):
-    """Обновляет статус наличия товара"""
     conn = sqlite3.connect('price_tracking.db')
     cursor = conn.cursor()
     
@@ -428,10 +364,7 @@ def update_product_availability(nm_id: str, is_available: bool):
     conn.close()
 
 
-
-
 def set_notify_on_appear(user_id: int, nm_id: str, notify: bool = True):
-    """Включает/выключает уведомления о появлении товара"""
     conn = sqlite3.connect('price_tracking.db')
     cursor = conn.cursor()
     
@@ -445,10 +378,7 @@ def set_notify_on_appear(user_id: int, nm_id: str, notify: bool = True):
     conn.close()
 
 
-
-
 def get_products_to_notify():
-    """Получает товары, за которыми нужно следить (нет в наличии)"""
     conn = sqlite3.connect('price_tracking.db')
     cursor = conn.cursor()
     
@@ -463,8 +393,6 @@ def get_products_to_notify():
     return items
 
 
-
-
 # --- Функции для работы с целевыми ценами ---
 def set_target_price(user_id: int, nm_id: str, target_price: Decimal):
     conn = sqlite3.connect('price_tracking.db')
@@ -477,8 +405,6 @@ def set_target_price(user_id: int, nm_id: str, target_price: Decimal):
     
     conn.commit()
     conn.close()
-
-
 
 
 def get_user_targets(user_id: int):
@@ -499,8 +425,6 @@ def get_user_targets(user_id: int):
     return targets
 
 
-
-
 def mark_target_achieved(user_id: int, nm_id: str):
     conn = sqlite3.connect('price_tracking.db')
     cursor = conn.cursor()
@@ -513,8 +437,6 @@ def mark_target_achieved(user_id: int, nm_id: str):
     
     conn.commit()
     conn.close()
-
-
 
 
 def remove_target(user_id: int, nm_id: str):
@@ -530,15 +452,10 @@ def remove_target(user_id: int, nm_id: str):
     conn.close()
 
 
-
-
-# --- Функция проверки цен (обновленная) ---
+# --- Функция проверки цен ---
 async def check_prices():
-    discounts = get_wallet_discount()
-    
     while True:
         try:
-            # Проверяем обычные товары (в наличии)
             tracked_items = get_all_tracked_items()
             total_items = len(tracked_items)
             
@@ -550,10 +467,8 @@ async def check_prices():
                 try:
                     logger.info(f"👤 Пользователь {user_id} | 📦 Товар {nm_id}")
                     
-                    # Используем новую функцию с проверкой наличия
                     current_price, _, is_available = await get_product_price_with_availability(url)
                     
-                    # Обновляем статус наличия
                     update_product_availability(nm_id, is_available)
                     
                     if not is_available or current_price is None:
@@ -568,7 +483,7 @@ async def check_prices():
                     if current_price_decimal != last_price_decimal:
                         update_price(nm_id, current_price_decimal)
                         
-                        price_with_auth = calc_price_with_wallet(current_price_decimal, discounts["auth"])
+                        price_with_wallet = calc_price_with_wallet(current_price_decimal)
                         
                         if current_price_decimal < last_price_decimal:
                             change_emoji = "📉"
@@ -583,8 +498,8 @@ async def check_prices():
                             f"{change_emoji} <b>Цена товара {change_text}!</b>\n\n"
                             f"🔗 <a href='{url}'>Ссылка на товар</a>\n\n"
                             f"💰 <b>Цена на WB:</b> {current_price_decimal} ₽\n"
-                            f"📉 <b>Изменение:</b> {price_diff} ₽\n"
-                            f"💎 <b>С ВБ Кошельком:</b> {price_with_auth} ₽"
+                            f"💎 <b>С ВБ Кошельком (3%):</b> {price_with_wallet} ₽\n"
+                            f"📉 <b>Изменение:</b> {price_diff} ₽"
                         )
                         
                         await bot.send_message(
@@ -594,11 +509,10 @@ async def check_prices():
                             disable_web_page_preview=True
                         )
                         
-                        logger.info(f"   📢 Уведомление об изменении цены отправлено")
+                        logger.info(f"   📢 Уведомление отправлено")
                     
-                    # Проверяем целевые цены
-                    price_with_auth = calc_price_with_wallet(current_price_decimal, discounts["auth"])
-                    check_target_prices(user_id, nm_id, url, price_with_auth)
+                    price_with_wallet = calc_price_with_wallet(current_price_decimal)
+                    check_target_prices(user_id, nm_id, url, price_with_wallet)
                     
                     await asyncio.sleep(2)
                     
@@ -606,7 +520,6 @@ async def check_prices():
                     logger.error(f"   ❌ Ошибка: {e}")
                     continue
             
-            # Проверяем товары, которых нет в наличии (ждут появления)
             waiting_items = get_products_to_notify()
             if waiting_items:
                 logger.info(f"🔍 Проверка {len(waiting_items)} товаров на появление...")
@@ -616,20 +529,17 @@ async def check_prices():
                         price, _, is_available = await get_product_price_with_availability(url)
                         
                         if is_available and price is not None:
-                            # Товар появился!
-                            
-                            # Обновляем статус
                             update_product_availability(nm_id, True)
                             update_price(nm_id, price)
                             
-                            price_with_auth = calc_price_with_wallet(price, discounts["auth"])
+                            price_with_wallet = calc_price_with_wallet(price)
                             
                             message = (
                                 f"🎉 <b>ТОВАР СНОВА В НАЛИЧИИ!</b>\n\n"
                                 f"📦 <b>Товар:</b> <a href='{url}'>Артикул {nm_id}</a>\n\n"
-                                f"💰 <b>Цена:</b> {price} ₽\n"
-                                f"💎 <b>С ВБ Кошельком:</b> {price_with_auth} ₽\n\n"
-                                f"✅ Скорее покупайте, пока не разобрали!"
+                                f"💰 <b>Цена на WB:</b> {price} ₽\n"
+                                f"💎 <b>С ВБ Кошельком (3%):</b> {price_with_wallet} ₽\n\n"
+                                f"✅ Скорее покупайте!"
                             )
                             
                             await bot.send_message(
@@ -639,7 +549,7 @@ async def check_prices():
                                 disable_web_page_preview=True
                             )
                             
-                            logger.info(f"   📢 Уведомление о появлении отправлено пользователю {user_id}")
+                            logger.info(f"   📢 Уведомление о появлении отправлено")
                             
                             await asyncio.sleep(1)
                             
@@ -657,10 +567,7 @@ async def check_prices():
             await asyncio.sleep(300)
 
 
-
-
-def check_target_prices(user_id: int, nm_id: str, url: str, current_price_with_auth: Decimal):
-    """Проверка достижения целевых цен"""
+def check_target_prices(user_id: int, nm_id: str, url: str, current_price_with_wallet: Decimal):
     try:
         conn = sqlite3.connect('price_tracking.db')
         cursor = conn.cursor()
@@ -677,21 +584,18 @@ def check_target_prices(user_id: int, nm_id: str, url: str, current_price_with_a
         for (target_price,) in targets:
             target_decimal = Decimal(str(target_price))
             
-            if current_price_with_auth <= target_decimal:
+            if current_price_with_wallet <= target_decimal:
                 mark_target_achieved(user_id, nm_id)
                 
                 asyncio.create_task(send_target_notification(
-                    user_id, nm_id, url, current_price_with_auth, target_decimal
+                    user_id, nm_id, url, current_price_with_wallet, target_decimal
                 ))
     except Exception as e:
         logger.error(f"Ошибка при проверке целевых цен: {e}")
 
 
-
-
 async def send_target_notification(user_id: int, nm_id: str, url: str, 
                                    current_price: Decimal, target_price: Decimal):
-    """Отправка уведомления о достижении целевой цены"""
     try:
         current_time = datetime.datetime.now() + datetime.timedelta(hours=5)
         time_str = current_time.strftime('%d.%m.%Y %H:%M')
@@ -699,7 +603,7 @@ async def send_target_notification(user_id: int, nm_id: str, url: str,
         message = (
             f"🎯 <b>ЦЕЛЕВАЯ ЦЕНА ДОСТИГНУТА!</b>\n\n"
             f"📦 <b>Товар:</b> <a href='{url}'>Артикул {nm_id}</a>\n\n"
-            f"💰 <b>Цена с ВБ Кошельком:</b> {current_price} ₽\n"
+            f"💰 <b>Цена с ВБ Кошельком (3%):</b> {current_price} ₽\n"
             f"🎯 <b>Ваша цель была:</b> {target_price} ₽\n"
             f"🕐 <b>Достигнута:</b> {time_str} (UTC+5)\n\n"
             f"✅ Самое время покупать!"
@@ -715,134 +619,79 @@ async def send_target_notification(user_id: int, nm_id: str, url: str,
         logger.error(f"Ошибка при отправке уведомления: {e}")
 
 
-
-
 # --- Обработчики команд ---
 @dp.message_handler(commands=['start'])
 async def start_command(message: types.Message):
-    discounts = get_wallet_discount()
     user_name = message.from_user.first_name
     
     welcome_text = (
         f"👋 <b>Привет, {user_name}!</b>\n\n"
         f"🛍️ <b>Добро пожаловать в бот отслеживания цен Wildberries!</b>\n\n"
-        f"📊 <b>Основная цена, на которую вам нужно смотреть - Цена с ВБ кошельком.</b>\n\n"
-        
+        f"📊 <b>Как работают цены:</b>\n"
+        f"• <b>Цена на WB</b> — текущая цена со скидкой продавца\n"
+        f"• <b>Цена с ВБ Кошельком</b> = Цена на WB - 3%\n\n"
         f"🎯 <b>Что я умею:</b>\n"
         f"✅ Отслеживать цены на любые товары Wildberries\n"
         f"✅ Уведомлять об изменении цен\n"
         f"✅ Оповещать при достижении желаемой цены\n"
-        f"✅ Сообщать, когда товар снова появится в наличии\n"
-        f"✅ Показывать историю изменения цен\n\n"
-        
+        f"✅ Сообщать, когда товар снова появится в наличии\n\n"
         f"📌 <b>Как начать:</b>\n"
         f"1️⃣ Просто отправь мне ссылку на товар\n"
         f"2️⃣ Нажми кнопку «Отслеживать»\n"
-        f"3️⃣ Я буду следить за ценой и пришлю уведомление!\n\n"
-        
+        f"3️⃣ Я буду следить за ценой!\n\n"
         f"🔍 <b>Пример:</b>\n"
         f"`https://www.wildberries.ru/catalog/12345678/detail.aspx`\n\n"
-        
-        f"ℹ️ <b>Доступные команды:</b>\n"
-        f"• /track [ссылка] - добавить товар\n"
-        f"• /mytrack - мои товары\n"
-        f"• /history [номер] - история цены\n"
-        f"• /target [номер] [цена] - установить цель\n"
-        f"• /mytargets - мои цели\n"
-        f"• /notify [номер] - уведомлять о появлении\n"
-        f"• /help - подробная инструкция"
+        f"ℹ️ <b>Доступные команды:</b> /help"
     )
     await message.answer(welcome_text, parse_mode="HTML")
 
 
-
-
 @dp.message_handler(commands=['help'])
 async def help_command(message: types.Message):
-    discounts = get_wallet_discount()
-    
     help_text = (
         "🆘 <b>Центр помощи</b>\n\n"
-        
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🎯 <b>КАК ПОЛЬЗОВАТЬСЯ БОТОМ</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        
-        "📌 <b>ШАГ 1: Найти товар</b>\n"
-        "• Открой Wildberries\n"
-        "• Найди нужный товар\n"
-        "• Скопируй ссылку из адресной строки или из приложения\n\n"
-        
-        "📌 <b>ШАГ 2: Отправить ссылку</b>\n"
-        "• Просто вставь ссылку в чат\n"
-        "• Бот покажет текущую цену\n"
-        "• Нажми кнопку «Отслеживать»\n\n"
-        
-        "📌 <b>ШАГ 3: Дополнительные настройки</b>\n"
-        "• /target - установить желаемую цену\n"
-        "• /notify - включить уведомление о появлении\n\n"
         
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
         "📋 <b>ВСЕ КОМАНДЫ</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         
         "🆕 <b>/track [ссылка]</b>\n"
-        "➜ Начать отслеживание товара\n"
+        "➜ Добавить товар в отслеживание\n"
         "📌 <i>Пример:</i> /track https://www.wildberries.ru/catalog/12345678/detail.aspx\n\n"
         
         "📋 <b>/mytrack</b>\n"
-        "➜ Показать все отслеживаемые товары\n"
-        "📌 <i>Пример:</i> /mytrack\n"
-        "   Бот покажет список с номерами:\n"
-        "   1. ✅ Товар 12345678 - 1500 ₽\n"
-        "   2. ❌ Товар 87654321 - нет в наличии 🔔\n\n"
+        "➜ Список ваших товаров\n\n"
         
         "🗑️ <b>/untrack [номер]</b>\n"
-        "➜ Удалить товар из отслеживания\n"
-        "📌 <i>Пример:</i> /untrack 1\n\n"
+        "➜ Удалить товар из отслеживания\n\n"
         
         "📊 <b>/history [номер]</b>\n"
-        "➜ Показать историю изменения цены\n"
-        "📌 <i>Пример:</i> /history 1\n\n"
-        
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🎯 <b>ЦЕЛЕВЫЕ ЦЕНЫ</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "➜ История изменения цены\n\n"
         
         "🎯 <b>/target [номер] [цена]</b>\n"
         "➜ Установить желаемую цену (для цены с ВБ Кошельком)\n"
         "📌 <i>Пример:</i> /target 1 5000\n\n"
         
         "🎯 <b>/mytargets</b>\n"
-        "➜ Показать все установленные цели\n\n"
+        "➜ Список ваших целей\n\n"
         
         "🗑️ <b>/removetarget [номер]</b>\n"
         "➜ Удалить целевую цену\n\n"
         
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🔔 <b>УВЕДОМЛЕНИЯ О ПОЯВЛЕНИИ</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        
         "🔔 <b>/notify [номер]</b>\n"
-        "➜ Включить уведомления, когда товар появится в наличии\n"
-        "📌 <i>Пример:</i> /notify 1\n\n"
+        "➜ Уведомлять о появлении товара\n\n"
         
         "🔕 <b>/stopnotify [номер]</b>\n"
-        "➜ Отключить уведомления о появлении\n\n"
+        "➜ Отключить уведомления\n\n"
         
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💡 <b>ПОЛЕЗНЫЕ СОВЕТЫ (скидка: {discounts['auth']}%)</b>\n"
+        f"💡 <b>ПОЛЕЗНЫЕ СОВЕТЫ</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         
-        "✅ <b>Как получить максимальную выгоду:</b>\n"
-        f"• Все цены показываются с учетом ВБ Кошелька ({discounts['auth']}%)\n"
+        f"• <b>Цена с ВБ Кошельком</b> = Цена на WB - 3%\n"
         "• Устанавливайте цели чуть ниже текущей цены\n"
-        "• Включайте уведомления для отсутствующих товаров\n\n"
-        
-        "⏱️ <b>Как часто проверяются цены:</b>\n"
-        "• Бот проверяет цены КАЖДЫЕ 30 МИНУТ\n"
-        "• При изменении цены вы получите уведомление\n"
-        "• При появлении товара - тоже уведомление\n\n"
+        "• Включайте уведомления для отсутствующих товаров\n"
+        "• Бот проверяет цены КАЖДЫЕ 30 МИНУТ\n\n"
         
         "🌍 <b>Часовой пояс:</b> UTC+5\n\n"
         
@@ -852,8 +701,6 @@ async def help_command(message: types.Message):
     )
     
     await message.answer(help_text, parse_mode="HTML")
-
-
 
 
 @dp.message_handler(commands=['track'])
@@ -872,30 +719,27 @@ async def track_command(message: types.Message):
     
     try:
         price, nm_id, is_available = await get_product_price_with_availability(url)
-        discounts = get_wallet_discount()
         
         if not is_available or price is None:
-            # Товара нет в наличии, но добавляем в отслеживание
             add_to_tracking(message.from_user.id, nm_id, url, Decimal('0'), False)
-            
             await message.answer(
                 f"ℹ️ <b>Товар добавлен в список ожидания</b>\n\n"
                 f"📦 Артикул: {nm_id}\n"
                 f"❌ Товар временно отсутствует в наличии\n\n"
-                f"🔔 Используйте /notify {len(get_user_tracked_items(message.from_user.id))} чтобы получить уведомление о появлении",
+                f"🔔 Используйте /notify чтобы получить уведомление о появлении",
                 parse_mode="HTML"
             )
             return
         
         add_to_tracking(message.from_user.id, nm_id, url, price, True)
         
-        price_with_auth = calc_price_with_wallet(price, discounts["auth"])
+        price_with_wallet = calc_price_with_wallet(price)
         
         await message.answer(
             f"✅ <b>Товар добавлен в отслеживание!</b>\n\n"
             f"📦 Артикул: {nm_id}\n"
-            f"💰 Цена: {price} ₽\n"
-            f"💎 С ВБ Кошельком: {price_with_auth} ₽",
+            f"💰 Цена на WB: {price} ₽\n"
+            f"💎 С ВБ Кошельком (3%): {price_with_wallet} ₽",
             parse_mode="HTML"
         )
         
@@ -904,12 +748,9 @@ async def track_command(message: types.Message):
         await message.answer("❌ Не удалось получить информацию о товаре")
 
 
-
-
 @dp.message_handler(commands=['mytrack'])
 async def mytrack_command(message: types.Message):
     items = get_user_tracked_items(message.from_user.id)
-    discounts = get_wallet_discount()
     
     if not items:
         await message.answer("📭 У вас пока нет отслеживаемых товаров\nДобавьте товар командой /track")
@@ -921,7 +762,6 @@ async def mytrack_command(message: types.Message):
         local_time = to_local_time(last_checked)
         formatted_date = local_time.strftime('%d.%m.%Y %H:%M')
         
-        # Получаем статус наличия из БД
         conn = sqlite3.connect('price_tracking.db')
         cursor = conn.cursor()
         cursor.execute('SELECT is_available, notify_on_appear FROM tracked_prices WHERE nm_id = ? AND user_id = ?', 
@@ -936,8 +776,8 @@ async def mytrack_command(message: types.Message):
         notify_emoji = " 🔔" if notify_on_appear else ""
         
         if is_available and last_price > 0:
-            price_with_auth = calc_price_with_wallet(Decimal(str(last_price)), discounts["auth"])
-            price_text = f"{last_price} ₽ (с кошельком: {price_with_auth} ₽)"
+            price_with_wallet = calc_price_with_wallet(Decimal(str(last_price)))
+            price_text = f"{last_price} ₽ (с кошельком: {price_with_wallet} ₽)"
         else:
             price_text = "Нет в наличии"
         
@@ -951,12 +791,9 @@ async def mytrack_command(message: types.Message):
         "📌 <b>Команды:</b>\n"
         "• /untrack [номер] - удалить\n"
         "• /notify [номер] - уведомлять о появлении\n"
-        "• /stopnotify [номер] - отключить уведомления\n"
         "• /target [номер] [цена] - установить цель"
     )
     await message.answer(response, parse_mode="HTML", disable_web_page_preview=True)
-
-
 
 
 @dp.message_handler(commands=['untrack'])
@@ -983,8 +820,6 @@ async def untrack_command(message: types.Message):
         await message.answer("❌ Введите номер цифрой")
 
 
-
-
 @dp.message_handler(commands=['history'])
 async def history_command(message: types.Message):
     args = message.get_args()
@@ -1009,21 +844,18 @@ async def history_command(message: types.Message):
             await message.answer("📊 История изменения цены пока отсутствует")
             return
         
-        discounts = get_wallet_discount()
         response = f"📊 <b>История цены</b>\n🔗 <a href='{url}'>Товар {nm_id}</a>\n\n"
         
         for price, checked_at in history[:10]:
             local_time = to_local_time(checked_at)
             formatted_date = local_time.strftime('%d.%m.%Y %H:%M')
-            price_with_auth = calc_price_with_wallet(Decimal(str(price)), discounts["auth"])
-            response += f"• {formatted_date}: {price} ₽ (с кошельком: {price_with_auth} ₽)\n"
+            price_with_wallet = calc_price_with_wallet(Decimal(str(price)))
+            response += f"• {formatted_date}: {price} ₽ (с кошельком: {price_with_wallet} ₽)\n"
         
         await message.answer(response, parse_mode="HTML", disable_web_page_preview=True)
         
     except ValueError:
         await message.answer("❌ Введите номер цифрой")
-
-
 
 
 @dp.message_handler(commands=['target'])
@@ -1050,12 +882,17 @@ async def target_command(message: types.Message):
         
         nm_id = items[item_number - 1][0]
         url = items[item_number - 1][1]
+        current_price = items[item_number - 1][2]
         
         set_target_price(message.from_user.id, nm_id, target_price)
+        
+        current_with_wallet = calc_price_with_wallet(current_price)
         
         await message.answer(
             f"✅ <b>Цель установлена!</b>\n\n"
             f"📦 <a href='{url}'>Товар {nm_id}</a>\n"
+            f"💰 Текущая цена на WB: {current_price} ₽\n"
+            f"💎 Текущая цена с кошельком: {current_with_wallet} ₽\n"
             f"🎯 Цель (с ВБ Кошельком): {target_price} ₽\n\n"
             f"🔔 Я уведомлю вас, когда цена достигнет цели!",
             parse_mode="HTML",
@@ -1066,12 +903,9 @@ async def target_command(message: types.Message):
         await message.answer("❌ Введите корректные числа")
 
 
-
-
 @dp.message_handler(commands=['mytargets'])
 async def mytargets_command(message: types.Message):
     targets = get_user_targets(message.from_user.id)
-    discounts = get_wallet_discount()
     
     if not targets:
         await message.answer(
@@ -1080,11 +914,11 @@ async def mytargets_command(message: types.Message):
         )
         return
     
-    response = "🎯 <b>Ваши цели:</b>\n\n"
+    response = "🎯 <b>Ваши цели (для цены с ВБ Кошельком):</b>\n\n"
     
     for i, (nm_id, target_price, is_achieved, created_at, url, current_price) in enumerate(targets, 1):
         status = "✅ Достигнута" if is_achieved else "⏳ Ожидание"
-        current_with_auth = calc_price_with_wallet(Decimal(str(current_price)), discounts["auth"])
+        current_with_wallet = calc_price_with_wallet(Decimal(str(current_price)))
         
         local_time = to_local_time(created_at)
         formatted_date = local_time.strftime('%d.%m.%Y')
@@ -1093,14 +927,12 @@ async def mytargets_command(message: types.Message):
             f"<b>{i}.</b> <a href='{url}'>Товар {nm_id}</a>\n"
             f"   📊 {status}\n"
             f"   🎯 Цель: {target_price} ₽\n"
-            f"   💰 Сейчас: {current_with_auth} ₽\n"
+            f"   💰 Сейчас с кошельком: {current_with_wallet} ₽\n"
             f"   📅 {formatted_date}\n\n"
         )
     
     response += "Для удаления: /removetarget [номер]"
     await message.answer(response, parse_mode="HTML", disable_web_page_preview=True)
-
-
 
 
 @dp.message_handler(commands=['removetarget'])
@@ -1127,11 +959,8 @@ async def removetarget_command(message: types.Message):
         await message.answer("❌ Введите номер цифрой")
 
 
-
-
 @dp.message_handler(commands=['notify'])
 async def notify_command(message: types.Message):
-    """Включить уведомления о появлении товара"""
     args = message.get_args()
     if not args:
         await message.answer("❌ Укажите номер товара из списка /mytrack")
@@ -1162,11 +991,8 @@ async def notify_command(message: types.Message):
         await message.answer("❌ Введите номер цифрой")
 
 
-
-
 @dp.message_handler(commands=['stopnotify'])
 async def stop_notify_command(message: types.Message):
-    """Выключить уведомления о появлении товара"""
     args = message.get_args()
     if not args:
         await message.answer("❌ Укажите номер товара из списка /mytrack")
@@ -1190,8 +1016,6 @@ async def stop_notify_command(message: types.Message):
         await message.answer("❌ Введите номер цифрой")
 
 
-
-
 @dp.message_handler()
 async def handle_link(message: types.Message):
     url = message.text.strip()
@@ -1205,7 +1029,6 @@ async def handle_link(message: types.Message):
 
     try:
         price, nm_id, is_available = await get_product_price_with_availability(url)
-        discounts = get_wallet_discount()
         
         keyboard = InlineKeyboardMarkup(row_width=1)
         track_button = InlineKeyboardButton(
@@ -1224,12 +1047,12 @@ async def handle_link(message: types.Message):
             )
             return
         
-        price_with_auth = calc_price_with_wallet(price, discounts["auth"])
+        price_with_wallet = calc_price_with_wallet(price)
 
 
         await message.answer(
             f"💰 <b>Цена на WB:</b> {price} ₽\n"
-            f"💎 <b>С ВБ Кошельком:</b> {price_with_auth} ₽\n\n"
+            f"💎 <b>С ВБ Кошельком (3%):</b> {price_with_wallet} ₽\n\n"
             f"📦 Артикул: {nm_id}",
             parse_mode="HTML",
             reply_markup=keyboard
@@ -1237,8 +1060,6 @@ async def handle_link(message: types.Message):
     except Exception as e:
         logger.error(f"Ошибка: {e}")
         await message.answer("❌ Не удалось получить информацию о товаре")
-
-
 
 
 @dp.callback_query_handler(lambda c: c.data and c.data.startswith('track_'))
@@ -1254,15 +1075,14 @@ async def process_callback_track(callback_query: types.CallbackQuery):
         await bot.answer_callback_query(callback_query.id, "✅ Товар добавлен!")
         
         if is_available and price:
-            discounts = get_wallet_discount()
-            price_with_auth = calc_price_with_wallet(price, discounts["auth"])
+            price_with_wallet = calc_price_with_wallet(price)
             
             await bot.send_message(
                 callback_query.from_user.id,
                 f"✅ <b>Товар добавлен в отслеживание!</b>\n\n"
                 f"📦 Артикул: {nm_id}\n"
-                f"💰 Цена: {price} ₽\n"
-                f"💎 С ВБ Кошельком: {price_with_auth} ₽",
+                f"💰 Цена на WB: {price} ₽\n"
+                f"💎 С ВБ Кошельком (3%): {price_with_wallet} ₽",
                 parse_mode="HTML"
             )
         else:
@@ -1283,16 +1103,12 @@ async def process_callback_track(callback_query: types.CallbackQuery):
         )
 
 
-
-
 # --- Запуск ---
 async def on_startup(dp):
     asyncio.create_task(check_prices())
     logger.info("=" * 50)
     logger.info("🚀 БОТ УСПЕШНО ЗАПУЩЕН!")
     logger.info("=" * 50)
-
-
 
 
 if __name__ == "__main__":
