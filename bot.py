@@ -160,18 +160,26 @@ def get_nm_id(url: str):
         return match.group(1)
     return None
 
-# --- Улучшенная функция получения цены с проверкой наличия (для сервера) ---
+# --- Диагностическая версия функции для Docker ---
 async def get_product_price_with_availability(url: str):
-    """Возвращает (цена, nm_id, есть_в_наличии) - работает на сервере"""
+    """Возвращает (цена, nm_id, есть_в_наличии) - с подробным логированием"""
     nm_id = get_nm_id(url)
     if not nm_id:
+        logger.error(f"❌ Не удалось извлечь NM_ID из URL: {url}")
         return None, None, False
 
+
+    logger.info(f"🔍 Начинаю проверку товара {nm_id}")
+    
     api_url = f"https://www.wildberries.ru/__internal/u-card/cards/v4/detail?appType=1&curr=rub&dest=-284542&spp=30&hide_vflags=4294967296&ab_testing=false&lang=ru&nm={nm_id}"
+    logger.info(f"🌐 API URL: {api_url}")
+
 
     try:
+        logger.info("🚀 Запуск Playwright...")
         async with async_playwright() as p:
-            # Запускаем браузер в headless режиме (без графического интерфейса)
+            logger.info("✅ Playwright запущен, запускаю браузер...")
+            
             browser = await p.chromium.launch(
                 headless=True,
                 args=[
@@ -182,79 +190,113 @@ async def get_product_price_with_availability(url: str):
                     '--disable-gpu'
                 ]
             )
+            logger.info("✅ Браузер запущен")
             
-            # Создаем новый контекст с правильными заголовками
             context = await browser.new_context(
                 user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             )
+            logger.info("✅ Контекст создан")
             
             page = await context.new_page()
+            logger.info("✅ Страница создана")
             
-            # Добавляем дополнительные заголовки
             await page.set_extra_http_headers({
                 "Accept": "application/json, text/plain, */*",
                 "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
                 "Referer": "https://www.wildberries.ru/",
                 "Origin": "https://www.wildberries.ru",
             })
+            logger.info("✅ Заголовки установлены")
             
-            # Увеличиваем таймаут для сервера
+            logger.info(f"📡 Отправляю запрос к API...")
             response = await page.goto(api_url, wait_until="networkidle", timeout=30000)
             
-            if response.status != 200:
-                logger.error(f"Ошибка HTTP {response.status} для товара {nm_id}")
+            status_code = response.status
+            logger.info(f"📊 Статус ответа: {status_code}")
+            
+            if status_code != 200:
+                logger.error(f"❌ API вернул статус {status_code}")
                 await browser.close()
                 return None, nm_id, False
             
             text = await response.text()
-            data = json.loads(text)
+            logger.info(f"📦 Получен ответ, размер: {len(text)} символов")
+            logger.info(f"📝 Первые 500 символов ответа: {text[:500]}")
             
-            # Закрываем браузер
+            try:
+                data = json.loads(text)
+                logger.info("✅ JSON распарсен успешно")
+            except json.JSONDecodeError as e:
+                logger.error(f"❌ Ошибка парсинга JSON: {e}")
+                await browser.close()
+                return None, nm_id, False
+            
             await browser.close()
+            logger.info("✅ Браузер закрыт")
         
-        # Проверяем наличие товара
-        if not data.get("products") or len(data["products"]) == 0:
-            logger.info(f"Товар {nm_id} отсутствует в наличии")
+        # Проверяем структуру ответа
+        logger.info(f"🔍 Ключи в ответе: {list(data.keys())}")
+        
+        if not data.get("products"):
+            logger.error(f"❌ В ответе нет поля 'products'")
             return None, nm_id, False
         
-        # Проверяем, есть ли цена
+        if len(data["products"]) == 0:
+            logger.error(f"❌ Массив products пуст")
+            return None, nm_id, False
+        
+        product = data["products"][0]
+        logger.info(f"📦 Информация о товаре: {list(product.keys())}")
+        
+        # Проверяем наличие цены
         try:
-            product = data["products"][0]
-            
-            # Проверяем разные варианты получения цены
             if "sizes" in product and len(product["sizes"]) > 0:
+                logger.info(f"📏 Найдено размеров: {len(product['sizes'])}")
                 size = product["sizes"][0]
                 
                 if "price" in size:
                     price_data = size["price"]
+                    logger.info(f"💰 Данные о цене: {price_data}")
                     
                     # Пробуем получить обычную цену
                     if "product" in price_data:
                         product_price_cop = price_data["product"]
-                        if product_price_cop > 0:  # Проверяем, что цена больше 0
+                        logger.info(f"💰 Цена в копейках (product): {product_price_cop}")
+                        
+                        if product_price_cop > 0:
                             product_price = Decimal(product_price_cop) / Decimal(100)
-                            logger.info(f"Товар {nm_id} в наличии, цена: {product_price} ₽")
+                            logger.info(f"✅ Товар {nm_id} в наличии, цена: {product_price} ₽")
                             return product_price, nm_id, True
                     
-                    # Если нет обычной цены, пробуем получить цену с кошельком
+                    # Пробуем получить цену с кошельком
                     if "wallet" in price_data:
                         wallet_price_cop = price_data["wallet"]
+                        logger.info(f"💰 Цена в копейках (wallet): {wallet_price_cop}")
+                        
                         if wallet_price_cop > 0:
                             wallet_price = Decimal(wallet_price_cop) / Decimal(100)
-                            logger.info(f"Товар {nm_id} в наличии, цена с кошельком: {wallet_price} ₽")
+                            logger.info(f"✅ Товар {nm_id} в наличии, цена с кошельком: {wallet_price} ₽")
                             return wallet_price, nm_id, True
+                else:
+                    logger.warning(f"⚠️ В размере нет поля 'price'")
+            else:
+                logger.warning(f"⚠️ В товаре нет размеров или sizes пуст")
             
-            # Если дошли сюда, значит товар есть, но цена не определена
-            logger.info(f"Товар {nm_id} есть в каталоге, но цена не указана")
+            # Если не нашли цену, но товар есть
+            logger.info(f"⚠️ Товар {nm_id} есть в каталоге, но цена не определена")
             return None, nm_id, True
             
         except (KeyError, IndexError) as e:
-            logger.error(f"Ошибка при парсинге цены товара {nm_id}: {e}")
+            logger.error(f"❌ Ошибка при парсинге цены: {e}")
             return None, nm_id, False
             
     except Exception as e:
-        logger.error(f"Ошибка при проверке товара {nm_id}: {e}")
+        logger.error(f"❌ Критическая ошибка: {type(e).__name__}: {e}")
+        import traceback
+        logger.error(f"📚 Traceback: {traceback.format_exc()}")
         return None, nm_id, False
+
+
 
 
 # --- Функции для работы с БД ---
