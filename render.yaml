@@ -4,12 +4,30 @@ services:
     runtime: python
     plan: free
     buildCommand: |
-      python -V
       pip install --upgrade pip
       pip install -r requirements.txt
-      playwright install chromium
-      playwright install-deps
+      PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/.cache/ms-playwright pip install playwright
+      PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/.cache/ms-playwright playwright install chromium
+      # Устанавливаем зависимости без sudo, используя apt-get напрямую
+      apt-get update && apt-get install -y \
+        libnss3 \
+        libnspr4 \
+        libatk-bridge2.0-0 \
+        libatk1.0-0 \
+        libx11-6 \
+        libxcomposite1 \
+        libxdamage1 \
+        libxext6 \
+        libxfixes3 \
+        libxrandr2 \
+        libgbm1 \
+        libxkbcommon0 \
+        libpango-1.0-0 \
+        libcairo2 \
+        libasound2
     startCommand: python bot.py
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: /opt/render/project/.cache/ms-playwright
