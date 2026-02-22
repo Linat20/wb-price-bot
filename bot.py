@@ -1,23 +1,25 @@
 ﻿# -*- coding: utf-8 -*-
-import os
-import random
-from aiohttp import web
 import asyncio
+import random
 import re
 import json
 import requests
 import sqlite3
 import datetime
+import random
 from decimal import Decimal, ROUND_FLOOR
 from loguru import logger
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from playwright.async_api import async_playwright
 
-TOKEN = "8546428848:AAFEjtDHvlw9ZfdyOSCXRgKBJBBjcucIbiQ"
+
+TOKEN = "8546428848:AAHrGEdOQWDAUPWwIGajy3qfUaZbZ0VnwuQ"
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
+
+
+
 
 # --- Функция для конвертации времени в UTC+5 ---
 def to_local_time(utc_time_str):
@@ -28,6 +30,9 @@ def to_local_time(utc_time_str):
         return local_time
     except:
         return datetime.datetime.now()
+
+
+
 
 # --- Инициализация базы данных ---
 def init_db():
@@ -74,6 +79,9 @@ def init_db():
     conn.commit()
     conn.close()
 
+
+
+
 # --- Функция для обновления структуры БД ---
 def update_db_for_availability():
     """Обновляет структуру базы данных для отслеживания наличия товара"""
@@ -101,12 +109,21 @@ def update_db_for_availability():
     except Exception as e:
         logger.error(f"Ошибка при обновлении БД: {e}")
 
+
+
+
 # Инициализация БД
 init_db()
 update_db_for_availability()
 
+
+
+
 # --- WB Wallet URLs ---
 DEFAULT_PAYMENT_URL = "https://static-basket-01.wbbasket.ru/vol1/global-payment/default-payment.json"
+
+
+
 
 # --- Получение скидки для кошелька ---
 def get_wallet_discount() -> dict:
@@ -118,8 +135,10 @@ def get_wallet_discount() -> dict:
     except Exception:
         return {"anon": 0, "auth": 0}
 
+
     if payload.get("state") != 0:
         return {"anon": 0, "auth": 0}
+
 
     discounts = {"anon": 0, "auth": 0}
     
@@ -139,6 +158,9 @@ def get_wallet_discount() -> dict:
     logger.info(f"Получены скидки: незалогиненный - {discounts['anon']}%, ВБ Клуб - {discounts['auth']}%")
     return discounts
 
+
+
+
 def calc_price_with_wallet(price: Decimal, discount_percent: Decimal) -> int:
     """Рассчитывает цену с учетом скидки"""
     if discount_percent <= 0:
@@ -150,144 +172,134 @@ def calc_price_with_wallet(price: Decimal, discount_percent: Decimal) -> int:
     
     return int(discounted_price)
 
+
+
+
 # --- Извлечение NM ID из ссылки ---
 def get_nm_id(url: str):
-    match = re.search(r'/catalog/(\d+)', url)
-    if match:
-        return match.group(1)
-    match = re.search(r'/product/(\d+)', url)
-    if match:
-        return match.group(1)
-    match = re.search(r'/products/(\d+)', url)
-    if match:
-        return match.group(1)
+    patterns = [
+        r'/catalog/(\d+)',
+        r'/product/(\d+)',
+        r'/products/(\d+)',
+        r'/(\d{5,})\.html',
+        r'nm=(\d+)'
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
     return None
 
-# --- Исправленная функция с правильными заголовками ---
+
+
+
 async def get_product_price_with_availability(url: str):
-    """Возвращает (цена, nm_id, есть_в_наличии) - исправлено для Wildberries"""
+    """Получает цену товара через API Wildberries с реальными куками"""
     nm_id = get_nm_id(url)
     if not nm_id:
+        logger.error(f"❌ Не удалось извлечь артикул из URL: {url}")
         return None, None, False
 
 
-    # Добавляем случайную задержку чтобы не выглядеть как бот
-    await asyncio.sleep(1)
-    
-    api_url = f"https://www.wildberries.ru/__internal/u-card/cards/v4/detail?appType=1&curr=rub&dest=-284542&spp=30&hide_vflags=4294967296&ab_testing=false&lang=ru&nm={nm_id}"
+    # Ваши куки из примера
+    cookies = {
+        '_wbauid': '9117851341767702431',
+        'x_wbaas_token': '1.1000.d1627711296f44628e9eca5a71ec989a.MHwxOTMuMTQzLjY3LjE1N3xNb3ppbGxhLzUuMCAoV2luZG93cyBOVCAxMC4wOyBXaW42NDsgeDY0KSBBcHBsZVdlYktpdC81MzcuMzYgKEtIVE1MLCBsaWtlIEdlY2tvKSBDaHJvbWUvMTQ0LjAuMC4wIFNhZmFyaS81MzcuMzZ8MTc3Mjc4NDQ3NXxyZXVzYWJsZXwyfGV5Sm9ZWE5vSWpvaUluMD18MHwzfDE3NzIxNzk2NzV8MQ==.MEUCIAZ3de8sle97/Qv63oxkMw4cKhXnp/0jH0C5g+VoqUiqAiEAmUkVA1jsg7Avnx+BzXZZFs3YO0lAJsB1f6AQy4MJNoA=',
+        '_cp': '1',
+        '_wbauid': '6169040771771582040',
+        'external-locale': 'ru',
+        'wbx-validation-key': 'aaafd817-319b-44d4-a99f-0dbffb64e712',
+        '__zzatw-wb': 'MDA0dC0yYBwREFsKEH49WgsbSl1pCENQGC9LXz1uLWEPJ3wjYnwgGWsvC1RDMmUIPkBNOTM5NGZwVydgTmAgSV5OCC0hF3xyH0FLVCNyM3dlaXceViUTFmcPRyJObXOuxw==',
+        'x-supplier-id-external': '',
+        'cfidsw-wb': 'GmKfgRiCnWRvUrJLpKEA5Bk8HGttak7hMxVeeXCqVkXV4Gol8FEKUaK4gEySLGWsqk8kuuirv+Zr+fbt9UEPf3fi2nUSbouRjRJJ+sPYgOX3Me4GBsh0DvuNGBzaj5Dc5hJcScKniqQYXgJbRKhTNMQdVs8jn+4whIkz',
+        'routeb': '1771692710.778.1977.438487|fc3b37d75a18d923fd0e9c7589719997',
+    }
+
+
+    # Ваши заголовки из примера
+    headers = {
+        'accept': '*/*',
+        'accept-language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+        'authorization': 'Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NzE3NTM2NDIsInVzZXIiOiIzMTAzMjc1NDYiLCJzaGFyZF9rZXkiOiIxMiIsImNsaWVudF9pZCI6IndiIiwic2Vzc2lvbl9pZCI6ImE1MzUzZWJjZjE3NDQ5ZjBiODA0ZGRkMThmZGY3YjQ1IiwicGhvbmUiOiIxbVdvSHMyV2llKzNDSjBHZXcvM2NBPT0iLCJ2YWxpZGF0aW9uX2tleSI6IjdlMWQwZWNmNDc3NTJjNzFkMWI2NzkxMDMzNDY4NTlhOTIzODQ0NTY2M2M2NzczNGUyNjA5ZGMxZGZjOWUwZjciLCJ1c2VyX3JlZ2lzdHJhdGlvbl9kdCI6MTc3MTU4MTA2NCwidmVyc2lvbiI6Mn0.Zc9rikmAHeFPB31k_UgXpzrJOhpE38jJ1ZsIdhVaMhWfM8kXIQ2hSeCTmVrDJUcZ-OuiHbw48uDhIoFZwqSYQxU1syvhnGSh35q7kDAsRv_0Lwkbo0nZlRdPpbmbCO0LSucYgZep3zQBF2h_xC1I_9iDNw5qc_kTKUj7PoORx2b460pwm65RNONDv8yF6H_OPYlYz399jhEGwsTbcbWJgRkYR3Gt4SGm31X2NQxbEFDIrmM_Mzka8jeArSTJnZSmRcXYhpICaCLYQvhpKxJ4rGE4Y_xZORJCrRYwqRYqL7z-H0287N5MDOV5AfBPmlgHQvDu80dLUiwwcFjqBV6lsw',
+        'deviceid': 'site_0a6c99d05f114a0d942ff4748e351610',
+        'priority': 'u=1, i',
+        'referer': 'https://www.wildberries.ru/catalog/471955155/detail.aspx?targetUrl=MI',
+        'sec-ch-ua': '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-origin',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
+        'x-requested-with': 'XMLHttpRequest',
+        'x-spa-version': '13.24.5',
+    }
+
+
+    # Формируем URL для одного товара
+    api_url = f"https://www.wildberries.ru/__internal/card/cards/v4/detail?appType=1&curr=rub&dest=-284542&spp=30&hide_vflags=4294967296&ab_testing=false&lang=ru&nm={nm_id}"
 
 
     try:
-        async with async_playwright() as p:
-            # Запускаем браузер с максимальной эмуляцией реального пользователя
-            browser = await p.chromium.launch(
-                headless=True,
-                args=[
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-accelerated-2d-canvas',
-                    '--disable-gpu',
-                    '--window-size=1920,1080',
-                    '--lang=ru'
-                ]
-            )
+        logger.info(f"🔍 Запрос к API: {api_url}")
+        
+        # Используем session для сохранения кук
+        session = requests.Session()
+        session.cookies.update(cookies)
+        session.headers.update(headers)
+        
+        response = await asyncio.to_thread(session.get, api_url, timeout=10)
+        
+        logger.info(f"📊 Статус ответа: {response.status_code}")
+        
+        if response.status_code != 200:
+            logger.error(f"❌ Ошибка HTTP {response.status_code}")
+            if response.text:
+                logger.debug(f"Ответ: {response.text[:200]}")
+            return None, nm_id, False
             
-            # Создаем контекст с полной эмуляцией
-            context = await browser.new_context(
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                viewport={'width': 1920, 'height': 1080},
-                locale='ru-RU',
-                timezone_id='Europe/Moscow'
-            )
-            
-            page = await context.new_page()
-            
-            # Устанавливаем заголовки как у реального браузера
-            await page.set_extra_http_headers({
-                'Accept': 'application/json, text/plain, */*',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-                'Cache-Control': 'no-cache',
-                'Connection': 'keep-alive',
-                'Pragma': 'no-cache',
-                'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                'Sec-Ch-Ua-Mobile': '?0',
-                'Sec-Ch-Ua-Platform': '"Windows"',
-                'Sec-Fetch-Dest': 'empty',
-                'Sec-Fetch-Mode': 'cors',
-                'Sec-Fetch-Site': 'same-origin',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'X-Requested-With': 'XMLHttpRequest'
-            })
-            
-            # Добавляем случайную задержку перед запросом
-            await asyncio.sleep(random.uniform(1, 3))
-            
-            response = await page.goto(api_url, wait_until="networkidle", timeout=45000)
-            
-            if response.status != 200:
-                logger.error(f"Ошибка HTTP {response.status} для товара {nm_id}")
-                await browser.close()
-                return None, nm_id, False
-            
-            text = await response.text()
-            
-            # Проверяем, не пустой ли ответ
-            if not text or len(text) < 10:
-                logger.error(f"Пустой ответ для товара {nm_id}")
-                await browser.close()
-                return None, nm_id, False
-            
-            data = json.loads(text)
-            await browser.close()
+        data = response.json()
         
         # Проверяем наличие товара
         if not data.get("products") or len(data["products"]) == 0:
-            logger.info(f"Товар {nm_id} отсутствует в наличии")
+            logger.info(f"❌ Товар {nm_id} не найден")
             return None, nm_id, False
         
-        # Парсим цену
-        try:
-            product = data["products"][0]
-            
-            # Пробуем разные пути к цене
-            price = None
-            
-            # Путь 1: через sizes
-            if "sizes" in product and len(product["sizes"]) > 0:
-                size = product["sizes"][0]
-                if "price" in size:
-                    price_data = size["price"]
-                    # Пробуем product цену
-                    if "product" in price_data and price_data["product"] > 0:
-                        price = Decimal(price_data["product"]) / Decimal(100)
-                    # Пробуем wallet цену
-                    elif "wallet" in price_data and price_data["wallet"] > 0:
-                        price = Decimal(price_data["wallet"]) / Decimal(100)
-            
-            # Путь 2: прямая цена в товаре
-            if not price and "price" in product:
-                if isinstance(product["price"], dict):
-                    if "product" in product["price"]:
-                        price = Decimal(product["price"]["product"]) / Decimal(100)
-                elif isinstance(product["price"], (int, float)):
-                    price = Decimal(product["price"]) / Decimal(100)
-            
-            if price and price > 0:
-                logger.info(f"✅ Товар {nm_id} в наличии, цена: {price} ₽")
-                return price, nm_id, True
-            else:
-                logger.info(f"⚠️ Товар {nm_id} есть, но цена не определена")
-                return None, nm_id, True
+        product = data["products"][0]
+        logger.info(f"📦 Найден товар: {product.get('name', 'Unknown')}")
+        
+        # Ищем цену
+        price = None
+        
+        if "sizes" in product and len(product["sizes"]) > 0:
+            size = product["sizes"][0]
+            if "price" in size:
+                price_data = size["price"]
+                logger.info(f"💰 Данные о цене: {price_data}")
                 
-        except Exception as e:
-            logger.error(f"Ошибка парсинга цены: {e}")
-            return None, nm_id, False
+                # Пробуем все варианты цен
+                if "product" in price_data and price_data["product"] > 0:
+                    price = price_data["product"] / 100
+                    logger.info(f"✅ Найдена цена product: {price} ₽")
+                elif "basic" in price_data and price_data["basic"] > 0:
+                    price = price_data["basic"] / 100
+                    logger.info(f"✅ Найдена цена basic: {price} ₽")
+                elif "total" in price_data and price_data["total"] > 0:
+                    price = price_data["total"] / 100
+                    logger.info(f"✅ Найдена цена total: {price} ₽")
+        
+        if price and price > 0:
+            logger.info(f"✅ Товар {nm_id} в наличии, цена: {price} ₽")
+            return Decimal(str(price)), nm_id, True
+        else:
+            logger.warning(f"⚠️ Товар {nm_id} есть, но цена не найдена")
+            return None, nm_id, True
             
     except Exception as e:
-        logger.error(f"Критическая ошибка: {e}")
+        logger.error(f"❌ Ошибка при проверке товара {nm_id}: {type(e).__name__}: {e}")
         return None, nm_id, False
+
 
 
 
@@ -312,6 +324,9 @@ def add_to_tracking(user_id: int, nm_id: str, url: str, price: Decimal, is_avail
     conn.commit()
     conn.close()
 
+
+
+
 def remove_from_tracking(user_id: int, nm_id: str):
     conn = sqlite3.connect('price_tracking.db')
     cursor = conn.cursor()
@@ -324,6 +339,9 @@ def remove_from_tracking(user_id: int, nm_id: str):
     
     conn.commit()
     conn.close()
+
+
+
 
 def get_user_tracked_items(user_id: int):
     conn = sqlite3.connect('price_tracking.db')
@@ -340,6 +358,9 @@ def get_user_tracked_items(user_id: int):
     conn.close()
     return items
 
+
+
+
 def get_all_tracked_items():
     conn = sqlite3.connect('price_tracking.db')
     cursor = conn.cursor()
@@ -353,6 +374,9 @@ def get_all_tracked_items():
     items = cursor.fetchall()
     conn.close()
     return items
+
+
+
 
 def update_price(nm_id: str, new_price: Decimal):
     conn = sqlite3.connect('price_tracking.db')
@@ -372,6 +396,9 @@ def update_price(nm_id: str, new_price: Decimal):
     conn.commit()
     conn.close()
 
+
+
+
 def get_price_history(nm_id: str, days: int = 7):
     conn = sqlite3.connect('price_tracking.db')
     cursor = conn.cursor()
@@ -387,6 +414,9 @@ def get_price_history(nm_id: str, days: int = 7):
     conn.close()
     return history
 
+
+
+
 def update_product_availability(nm_id: str, is_available: bool):
     """Обновляет статус наличия товара"""
     conn = sqlite3.connect('price_tracking.db')
@@ -401,6 +431,9 @@ def update_product_availability(nm_id: str, is_available: bool):
     conn.commit()
     conn.close()
 
+
+
+
 def set_notify_on_appear(user_id: int, nm_id: str, notify: bool = True):
     """Включает/выключает уведомления о появлении товара"""
     conn = sqlite3.connect('price_tracking.db')
@@ -414,6 +447,9 @@ def set_notify_on_appear(user_id: int, nm_id: str, notify: bool = True):
     
     conn.commit()
     conn.close()
+
+
+
 
 def get_products_to_notify():
     """Получает товары, за которыми нужно следить (нет в наличии)"""
@@ -430,6 +466,9 @@ def get_products_to_notify():
     conn.close()
     return items
 
+
+
+
 # --- Функции для работы с целевыми ценами ---
 def set_target_price(user_id: int, nm_id: str, target_price: Decimal):
     conn = sqlite3.connect('price_tracking.db')
@@ -442,6 +481,9 @@ def set_target_price(user_id: int, nm_id: str, target_price: Decimal):
     
     conn.commit()
     conn.close()
+
+
+
 
 def get_user_targets(user_id: int):
     conn = sqlite3.connect('price_tracking.db')
@@ -460,6 +502,9 @@ def get_user_targets(user_id: int):
     conn.close()
     return targets
 
+
+
+
 def mark_target_achieved(user_id: int, nm_id: str):
     conn = sqlite3.connect('price_tracking.db')
     cursor = conn.cursor()
@@ -473,6 +518,9 @@ def mark_target_achieved(user_id: int, nm_id: str):
     conn.commit()
     conn.close()
 
+
+
+
 def remove_target(user_id: int, nm_id: str):
     conn = sqlite3.connect('price_tracking.db')
     cursor = conn.cursor()
@@ -484,6 +532,9 @@ def remove_target(user_id: int, nm_id: str):
     
     conn.commit()
     conn.close()
+
+
+
 
 # --- Функция проверки цен (обновленная) ---
 async def check_prices():
@@ -609,6 +660,9 @@ async def check_prices():
             logger.error(f"❌ Критическая ошибка: {e}")
             await asyncio.sleep(300)
 
+
+
+
 def check_target_prices(user_id: int, nm_id: str, url: str, current_price_with_auth: Decimal):
     """Проверка достижения целевых цен"""
     try:
@@ -636,6 +690,9 @@ def check_target_prices(user_id: int, nm_id: str, url: str, current_price_with_a
     except Exception as e:
         logger.error(f"Ошибка при проверке целевых цен: {e}")
 
+
+
+
 async def send_target_notification(user_id: int, nm_id: str, url: str, 
                                    current_price: Decimal, target_price: Decimal):
     """Отправка уведомления о достижении целевой цены"""
@@ -660,6 +717,9 @@ async def send_target_notification(user_id: int, nm_id: str, url: str,
         )
     except Exception as e:
         logger.error(f"Ошибка при отправке уведомления: {e}")
+
+
+
 
 # --- Обработчики команд ---
 @dp.message_handler(commands=['start'])
@@ -697,6 +757,9 @@ async def start_command(message: types.Message):
         f"• /help - подробная инструкция"
     )
     await message.answer(welcome_text, parse_mode="HTML")
+
+
+
 
 @dp.message_handler(commands=['help'])
 async def help_command(message: types.Message):
@@ -794,6 +857,9 @@ async def help_command(message: types.Message):
     
     await message.answer(help_text, parse_mode="HTML")
 
+
+
+
 @dp.message_handler(commands=['track'])
 async def track_command(message: types.Message):
     args = message.get_args()
@@ -840,6 +906,9 @@ async def track_command(message: types.Message):
     except Exception as e:
         logger.error(f"Ошибка: {e}")
         await message.answer("❌ Не удалось получить информацию о товаре")
+
+
+
 
 @dp.message_handler(commands=['mytrack'])
 async def mytrack_command(message: types.Message):
@@ -891,6 +960,9 @@ async def mytrack_command(message: types.Message):
     )
     await message.answer(response, parse_mode="HTML", disable_web_page_preview=True)
 
+
+
+
 @dp.message_handler(commands=['untrack'])
 async def untrack_command(message: types.Message):
     args = message.get_args()
@@ -913,6 +985,9 @@ async def untrack_command(message: types.Message):
         
     except ValueError:
         await message.answer("❌ Введите номер цифрой")
+
+
+
 
 @dp.message_handler(commands=['history'])
 async def history_command(message: types.Message):
@@ -951,6 +1026,9 @@ async def history_command(message: types.Message):
         
     except ValueError:
         await message.answer("❌ Введите номер цифрой")
+
+
+
 
 @dp.message_handler(commands=['target'])
 async def target_command(message: types.Message):
@@ -991,6 +1069,9 @@ async def target_command(message: types.Message):
     except ValueError:
         await message.answer("❌ Введите корректные числа")
 
+
+
+
 @dp.message_handler(commands=['mytargets'])
 async def mytargets_command(message: types.Message):
     targets = get_user_targets(message.from_user.id)
@@ -1023,6 +1104,9 @@ async def mytargets_command(message: types.Message):
     response += "Для удаления: /removetarget [номер]"
     await message.answer(response, parse_mode="HTML", disable_web_page_preview=True)
 
+
+
+
 @dp.message_handler(commands=['removetarget'])
 async def removetarget_command(message: types.Message):
     args = message.get_args()
@@ -1045,6 +1129,9 @@ async def removetarget_command(message: types.Message):
         
     except ValueError:
         await message.answer("❌ Введите номер цифрой")
+
+
+
 
 @dp.message_handler(commands=['notify'])
 async def notify_command(message: types.Message):
@@ -1078,6 +1165,9 @@ async def notify_command(message: types.Message):
     except ValueError:
         await message.answer("❌ Введите номер цифрой")
 
+
+
+
 @dp.message_handler(commands=['stopnotify'])
 async def stop_notify_command(message: types.Message):
     """Выключить уведомления о появлении товара"""
@@ -1103,6 +1193,9 @@ async def stop_notify_command(message: types.Message):
     except ValueError:
         await message.answer("❌ Введите номер цифрой")
 
+
+
+
 @dp.message_handler()
 async def handle_link(message: types.Message):
     url = message.text.strip()
@@ -1112,6 +1205,7 @@ async def handle_link(message: types.Message):
         return
     
     await message.answer("🔍 Получаю информацию...")
+
 
     try:
         price, nm_id, is_available = await get_product_price_with_availability(url)
@@ -1136,6 +1230,7 @@ async def handle_link(message: types.Message):
         
         price_with_auth = calc_price_with_wallet(price, discounts["auth"])
 
+
         await message.answer(
             f"💰 <b>Цена на WB:</b> {price} ₽\n"
             f"💎 <b>С ВБ Кошельком:</b> {price_with_auth} ₽\n\n"
@@ -1146,6 +1241,9 @@ async def handle_link(message: types.Message):
     except Exception as e:
         logger.error(f"Ошибка: {e}")
         await message.answer("❌ Не удалось получить информацию о товаре")
+
+
+
 
 @dp.callback_query_handler(lambda c: c.data and c.data.startswith('track_'))
 async def process_callback_track(callback_query: types.CallbackQuery):
@@ -1187,36 +1285,19 @@ async def process_callback_track(callback_query: types.CallbackQuery):
             "❌ Ошибка при добавлении",
             show_alert=True
         )
-        
-# --- Добавьте эти функции перед on_startup ---
-async def handle(request):
-    return web.Response(text="🤖 WB Price Bot is running!\n\n✅ Bot is active and working correctly.")
 
-async def start_http_server():
-    app = web.Application()
-    app.router.add_get('/', handle)
-    
-    port = int(os.environ.get('PORT', 10000))
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    logger.info(f"🌐 HTTP сервер запущен на порту {port}")
 
-# --- Обновите on_startup ---
-async def on_startup(dp):
-    asyncio.create_task(check_prices())
-    asyncio.create_task(start_http_server())  # Добавьте эту строку
-    logger.info("=" * 50)
-    logger.info("🚀 БОТ УСПЕШНО ЗАПУЩЕН!")
-    logger.info("=" * 50)
-    
+
+
 # --- Запуск ---
 async def on_startup(dp):
     asyncio.create_task(check_prices())
     logger.info("=" * 50)
     logger.info("🚀 БОТ УСПЕШНО ЗАПУЩЕН!")
     logger.info("=" * 50)
+
+
+
 
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
