@@ -8,12 +8,15 @@ services:
       pip install --upgrade pip
       pip install -r requirements.txt
 
-      # 2. Устанавливаем Playwright и браузеры в папку проекта
-      PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/.cache/ms-playwright pip install playwright
-      PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/.cache/ms-playwright playwright install chromium
 
-      # 3. Устанавливаем системные библиотеки, необходимые для работы Chromium.
-      #    Это безопасный способ, не требующий прав root, так как Render и так работает под root на этапе сборки.
+      # 2. Устанавливаем Playwright и браузеры, указывая путь для кэша
+      export PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/.cache/ms-playwright
+      pip install playwright
+      playwright install chromium
+
+
+      # 3. Критически важный шаг: устанавливаем системные библиотеки через apt-get
+      #    На этапе сборки Render имеет для этого все права.
       apt-get update
       apt-get install -y --no-install-recommends \
         libnss3 \
@@ -34,7 +37,7 @@ services:
         libatspi2.0-0 \
         libwayland-client0 \
         libwayland-egl1
-      # Удаляем кэш apt для уменьшения размера образа
+      # Очищаем кэш apt, чтобы не раздувать образ
       rm -rf /var/lib/apt/lists/*
     startCommand: python bot.py
     envVars:
@@ -42,3 +45,4 @@ services:
         value: 3.11.9
       - key: PLAYWRIGHT_BROWSERS_PATH
         value: /opt/render/project/.cache/ms-playwright
+
