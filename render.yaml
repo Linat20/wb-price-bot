@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: wb-price-bot
+    runtime: python
+    plan: free
+    buildCommand: |
+      pip install -r requirements.txt
+      pip install playwright
+      playwright install chromium
+      playwright install-deps
+    startCommand: python bot.py
