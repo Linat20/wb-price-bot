@@ -1,4 +1,6 @@
 ﻿# -*- coding: utf-8 -*-
+from aiohttp import web
+import os
 import asyncio
 import re
 import json
@@ -1102,10 +1104,28 @@ async def process_callback_track(callback_query: types.CallbackQuery):
             show_alert=True
         )
 
+async def handle_health(request):
+    """Просто отвечает, что бот жив"""
+    return web.Response(text="WB Price Bot is running! 🤖")
 
+async def start_http_server():
+    """Запускает минимальный HTTP-сервер для Render"""
+    app = web.Application()
+    app.router.add_get('/', handle_health)
+    
+    # Render сам передаёт порт через переменную окружения
+    port = int(os.environ.get('PORT', 10000))
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    logger.info(f"🌐 HTTP сервер запущен на порту {port} (для Render)")
+    
 # --- Запуск ---
 async def on_startup(dp):
     asyncio.create_task(check_prices())
+    asyncio.create_task(start_http_server())  # Добавить эту строку
     logger.info("=" * 50)
     logger.info("🚀 БОТ УСПЕШНО ЗАПУЩЕН!")
     logger.info("=" * 50)
