@@ -993,7 +993,71 @@ async def notify_command(message: types.Message):
     except ValueError:
         await message.answer("❌ Введите номер цифрой")
 
-
+@dp.message_handler(commands=['getdb'])
+async def get_database(message: types.Message):
+    """Отправляет файл базы данных (только для админа)"""
+    # Замените 513751418 на ваш Telegram ID
+    ADMIN_ID = 513751418
+    
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ У вас нет доступа к этой команде")
+        return
+    
+    import os
+    import sqlite3
+    import tempfile
+    
+    try:
+        # Проверяем, существует ли файл базы
+        if not os.path.exists('price_tracking.db'):
+            await message.answer("❌ Файл базы данных не найден")
+            return
+        
+        # Создаем резервную копию с текущей датой
+        import datetime
+        date_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_name = f"price_tracking_backup_{date_str}.db"
+        
+        # Копируем файл (чтобы не блокировать основную базу)
+        import shutil
+        shutil.copy2('price_tracking.db', backup_name)
+        
+        # Отправляем файл
+        with open(backup_name, 'rb') as f:
+            await message.answer_document(
+                f,
+                caption=f"📦 Резервная копия базы данных\n🕐 {date_str}"
+            )
+        
+        # Удаляем временную копию
+        os.remove(backup_name)
+        
+        # Показываем статистику
+        conn = sqlite3.connect('price_tracking.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT COUNT(DISTINCT user_id) FROM tracked_prices WHERE is_active = 1')
+        users = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(*) FROM tracked_prices WHERE is_active = 1')
+        items = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(*) FROM target_prices WHERE is_achieved = 0')
+        targets = cursor.fetchone()[0]
+        
+        conn.close()
+        
+        await message.answer(
+            f"📊 <b>Статистика:</b>\n"
+            f"👥 Пользователей: {users}\n"
+            f"📦 Товаров: {items}\n"
+            f"🎯 Активных целей: {targets}",
+            parse_mode="HTML"
+        )
+        
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
+        
 @dp.message_handler(commands=['stopnotify'])
 async def stop_notify_command(message: types.Message):
     args = message.get_args()
