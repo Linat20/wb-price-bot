@@ -14,7 +14,7 @@ from aiogram.utils import executor
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 
-TOKEN = "8546428848:AAHBrZ0F_EdHR7KrQ_pAmHyDQFMKH8UGW78"
+TOKEN = "8546428848:AAH1DQGEDCuY3VsmAmZTMPy22XFKU_XR06M"
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
@@ -1059,19 +1059,49 @@ async def get_database(message: types.Message):
         await message.answer(f"❌ Ошибка: {e}")
 
 @dp.message_handler(commands=['restoredb'])
-async def restore_database(message: types.Message):
-    """Восстанавливает базу данных из присланного файла (только для админа)"""
-    # ЗАМЕНИТЕ НА СВОЙ ID
-    ADMIN_ID = 513751418
+async def restore_db_start(message: types.Message):
+    """Начинает процесс восстановления базы данных"""
+    ADMIN_ID = 513751418  # ЗАМЕНИТЕ НА СВОЙ ID
     
     if message.from_user.id != ADMIN_ID:
         await message.answer("❌ У вас нет доступа к этой команде")
         return
     
-    # Проверяем, что прислали файл
-    if not message.document:
-        await message.answer("❌ Отправьте файл базы данных (price_tracking.db)")
+    # Просим прислать файл
+    await message.answer(
+        "📤 <b>Восстановление базы данных</b>\n\n"
+        "Пожалуйста, отправьте мне файл базы данных (`price_tracking.db`), который хотите восстановить.\n\n"
+        "⚠️ <b>Внимание:</b> Текущая база будет заменена!",
+        parse_mode="HTML"
+    )
+    
+    # Сохраняем состояние, что ожидаем файл для восстановления
+    if not hasattr(dp, "restore_state"):
+        dp.restore_state = {}
+    
+    dp.restore_state[message.from_user.id] = {"waiting_for_file": True}
+
+
+
+
+@dp.message_handler(content_types=['document'])
+async def handle_restore_file(message: types.Message):
+    """Обрабатывает присланный файл для восстановления"""
+    ADMIN_ID = 513751418  # ЗАМЕНИТЕ НА СВОЙ ID
+    
+    # Проверяем, что это админ и он ожидает файл
+    if message.from_user.id != ADMIN_ID:
         return
+    
+    if not hasattr(dp, "restore_state") or not dp.restore_state.get(message.from_user.id, {}).get("waiting_for_file"):
+        # Если не в режиме восстановления, игнорируем
+        return
+    
+    # Удаляем из режима ожидания
+    dp.restore_state[message.from_user.id] = {}
+    
+    # Отправляем сообщение о начале обработки
+    status_msg = await message.answer("⏳ Обрабатываю файл...")
     
     try:
         # Скачиваем присланный файл
@@ -1083,12 +1113,13 @@ async def restore_database(message: types.Message):
             test_conn = sqlite3.connect("uploaded.db")
             test_conn.execute("SELECT * FROM sqlite_master")
             test_conn.close()
-        except:
-            await message.answer("❌ Присланный файл не является базой данных SQLite")
-            os.remove("uploaded.db")
+        except Exception as e:
+            await status_msg.edit_text(f"❌ Присланный файл не является базой данных SQLite: {e}")
+            if os.path.exists("uploaded.db"):
+                os.remove("uploaded.db")
             return
         
-        # Создаем бэкап текущей базы на всякий случай
+        # Создаем бэкап текущей базы
         import datetime
         import shutil
         
@@ -1096,7 +1127,8 @@ async def restore_database(message: types.Message):
         
         if os.path.exists('price_tracking.db'):
             shutil.copy2('price_tracking.db', f'price_tracking_backup_{date_str}.db')
-            await message.answer(f"✅ Создан бэкап текущей базы: `price_tracking_backup_{date_str}.db`")
+            await status_msg.edit_text(f"✅ Создан бэкап текущей базы: `price_tracking_backup_{date_str}.db`")
+            status_msg = await message.answer("⏳ Восстанавливаю...")
         
         # Заменяем текущую базу
         shutil.move("uploaded.db", "price_tracking.db")
@@ -1104,6 +1136,17 @@ async def restore_database(message: types.Message):
         # Показываем статистику восстановленной базы
         conn = sqlite3.connect('price_tracking.db')
         cursor = conn.cursor()
+        
+        # Получаем статистику по таблицам
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tables = cursor.fetchall()
+        
+        stats = []
+        for table in tables:
+            table_name = table[0]
+            cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+            count = cursor.fetchone()[0]
+            stats.append(f"📁 {table_name}: {count} записей")
         
         cursor.execute('SELECT COUNT(DISTINCT user_id) FROM tracked_prices WHERE is_active = 1')
         users = cursor.fetchone()[0] or 0
@@ -1116,20 +1159,23 @@ async def restore_database(message: types.Message):
         
         conn.close()
         
-        await message.answer(
+        await status_msg.edit_text(
             f"✅ <b>База данных успешно восстановлена!</b>\n\n"
             f"📊 <b>Статистика:</b>\n"
             f"👥 Пользователей: {users}\n"
             f"📦 Товаров: {items}\n"
-            f"🎯 Активных целей: {targets}",
+            f"🎯 Активных целей: {targets}\n\n"
+            f"📋 <b>Детально:</b>\n" + "\n".join(stats),
             parse_mode="HTML"
         )
         
     except Exception as e:
-        await message.answer(f"❌ Ошибка при восстановлении: {e}")
-        # Очищаем временные файлы
+        await status_msg.edit_text(f"❌ Ошибка при восстановлении: {e}")
         if os.path.exists("uploaded.db"):
             os.remove("uploaded.db")
+
+
+
 
 @dp.message_handler(commands=['send_message'])
 async def send_message_to_all(message: types.Message):
