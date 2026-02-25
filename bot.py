@@ -14,7 +14,7 @@ from aiogram.utils import executor
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 
-TOKEN = "8546428848:AAFnTtzk6NMI6X7QbfyXd1YIwpuMnIoWeis"
+TOKEN = "8546428848:AAHBrZ0F_EdHR7KrQ_pAmHyDQFMKH8UGW78"
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
@@ -1057,6 +1057,212 @@ async def get_database(message: types.Message):
         
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
+
+@dp.message_handler(commands=['restoredb'])
+async def restore_database(message: types.Message):
+    """Восстанавливает базу данных из присланного файла (только для админа)"""
+    # ЗАМЕНИТЕ НА СВОЙ ID
+    ADMIN_ID = 513751418
+    
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ У вас нет доступа к этой команде")
+        return
+    
+    # Проверяем, что прислали файл
+    if not message.document:
+        await message.answer("❌ Отправьте файл базы данных (price_tracking.db)")
+        return
+    
+    try:
+        # Скачиваем присланный файл
+        file = await message.document.download(destination_file="uploaded.db")
+        
+        # Проверяем, что это SQLite база
+        import sqlite3
+        try:
+            test_conn = sqlite3.connect("uploaded.db")
+            test_conn.execute("SELECT * FROM sqlite_master")
+            test_conn.close()
+        except:
+            await message.answer("❌ Присланный файл не является базой данных SQLite")
+            os.remove("uploaded.db")
+            return
+        
+        # Создаем бэкап текущей базы на всякий случай
+        import datetime
+        import shutil
+        
+        date_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        if os.path.exists('price_tracking.db'):
+            shutil.copy2('price_tracking.db', f'price_tracking_backup_{date_str}.db')
+            await message.answer(f"✅ Создан бэкап текущей базы: `price_tracking_backup_{date_str}.db`")
+        
+        # Заменяем текущую базу
+        shutil.move("uploaded.db", "price_tracking.db")
+        
+        # Показываем статистику восстановленной базы
+        conn = sqlite3.connect('price_tracking.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT COUNT(DISTINCT user_id) FROM tracked_prices WHERE is_active = 1')
+        users = cursor.fetchone()[0] or 0
+        
+        cursor.execute('SELECT COUNT(*) FROM tracked_prices WHERE is_active = 1')
+        items = cursor.fetchone()[0] or 0
+        
+        cursor.execute('SELECT COUNT(*) FROM target_prices WHERE is_achieved = 0')
+        targets = cursor.fetchone()[0] or 0
+        
+        conn.close()
+        
+        await message.answer(
+            f"✅ <b>База данных успешно восстановлена!</b>\n\n"
+            f"📊 <b>Статистика:</b>\n"
+            f"👥 Пользователей: {users}\n"
+            f"📦 Товаров: {items}\n"
+            f"🎯 Активных целей: {targets}",
+            parse_mode="HTML"
+        )
+        
+    except Exception as e:
+        await message.answer(f"❌ Ошибка при восстановлении: {e}")
+        # Очищаем временные файлы
+        if os.path.exists("uploaded.db"):
+            os.remove("uploaded.db")
+
+@dp.message_handler(commands=['send_message'])
+async def send_message_to_all(message: types.Message):
+    """Отправляет сообщение всем пользователям бота (только для админа)"""
+    ADMIN_ID = 123456789  # ЗАМЕНИТЕ НА СВОЙ ID
+    
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ У вас нет доступа к этой команде")
+        return
+    
+    # Просим ввести сообщение
+    await message.answer(
+        "📝 <b>Режим рассылки активирован</b>\n\n"
+        "Отправьте мне сообщение, которое хотите разослать всем пользователям.\n"
+        "Это может быть текст, фото, видео или документ.\n\n"
+        "Для отмены отправьте /cancel",
+        parse_mode="HTML"
+    )
+    
+    # Сохраняем состояние, что ожидаем сообщение для рассылки
+    # Для этого можно использовать простой словарь или FSM (Finite State Machine)
+    # Но для простоты создадим глобальный словарь
+    if not hasattr(dp, "broadcast_data"):
+        dp.broadcast_data = {}
+    
+    dp.broadcast_data[message.from_user.id] = {"state": "waiting_for_message"}
+
+
+@dp.message_handler(commands=['cancel'])
+async def cancel_broadcast(message: types.Message):
+    """Отменяет текущую операцию"""
+    if hasattr(dp, "broadcast_data") and message.from_user.id in dp.broadcast_data:
+        del dp.broadcast_data[message.from_user.id]
+        await message.answer("✅ Рассылка отменена")
+    else:
+        await message.answer("❌ Нет активной операции")
+
+
+@dp.message_handler(content_types=types.ContentType.ANY)
+async def handle_broadcast_message(message: types.Message):
+    """Обрабатывает сообщение для рассылки"""
+    # Проверяем, находится ли админ в режиме ожидания сообщения для рассылки
+    if not hasattr(dp, "broadcast_data") or message.from_user.id not in dp.broadcast_data:
+        # Если не в режиме рассылки, передаем обработку обычному обработчику ссылок
+        if re.search(r'wildberries\.ru', message.text or ''):
+            await handle_link(message)
+        return
+    
+    # Удаляем из режима ожидания
+    del dp.broadcast_data[message.from_user.id]
+    
+    # Получаем всех пользователей
+    conn = sqlite3.connect('price_tracking.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT DISTINCT user_id FROM tracked_prices WHERE is_active = 1')
+    users = cursor.fetchall()
+    
+    # Добавляем также админа, если его нет в списке (чтобы отправить и себе)
+    admin_id = 513751418  # Ваш ID
+    user_ids = set([u[0] for u in users])
+    user_ids.add(admin_id)
+    
+    conn.close()
+    
+    if not user_ids:
+        await message.answer("❌ Нет пользователей для рассылки")
+        return
+    
+    total_users = len(user_ids)
+    successful = 0
+    failed = 0
+    
+    status_msg = await message.answer(f"📨 Начинаю рассылку {total_users} пользователям...")
+    
+    # Отправляем сообщение каждому пользователю
+    for i, user_id in enumerate(user_ids):
+        try:
+            # Копируем сообщение (отправляем то же самое, что прислал админ)
+            if message.photo:
+                # Если это фото
+                await bot.send_photo(
+                    user_id,
+                    message.photo[-1].file_id,
+                    caption=message.caption,
+                    parse_mode="HTML"
+                )
+            elif message.video:
+                # Если это видео
+                await bot.send_video(
+                    user_id,
+                    message.video.file_id,
+                    caption=message.caption,
+                    parse_mode="HTML"
+                )
+            elif message.document:
+                # Если это документ
+                await bot.send_document(
+                    user_id,
+                    message.document.file_id,
+                    caption=message.caption,
+                    parse_mode="HTML"
+                )
+            else:
+                # Если это просто текст
+                await bot.send_message(
+                    user_id,
+                    message.text or "🔔 Сообщение от администратора",
+                    parse_mode="HTML"
+                )
+            
+            successful += 1
+            # Обновляем статус каждые 10 сообщений
+            if (i + 1) % 10 == 0:
+                await status_msg.edit_text(f"📨 Прогресс: {i+1}/{total_users}...")
+                
+            # Небольшая задержка, чтобы не спамить
+            await asyncio.sleep(0.05)
+            
+        except Exception as e:
+            failed += 1
+            logger.error(f"Ошибка отправки пользователю {user_id}: {e}")
+    
+    # Итоговый отчет
+    await status_msg.edit_text(
+        f"✅ <b>Рассылка завершена!</b>\n\n"
+        f"📊 <b>Статистика:</b>\n"
+        f"👥 Всего пользователей: {total_users}\n"
+        f"✅ Успешно: {successful}\n"
+        f"❌ Не удалось: {failed}",
+        parse_mode="HTML"
+    )
+
         
 @dp.message_handler(commands=['stopnotify'])
 async def stop_notify_command(message: types.Message):
