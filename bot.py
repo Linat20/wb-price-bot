@@ -1134,7 +1134,7 @@ async def restore_database(message: types.Message):
 @dp.message_handler(commands=['send_message'])
 async def send_message_to_all(message: types.Message):
     """Отправляет сообщение всем пользователям бота (только для админа)"""
-    ADMIN_ID = 123456789  # ЗАМЕНИТЕ НА СВОЙ ID
+    ADMIN_ID = 513751418  # ЗАМЕНИТЕ НА СВОЙ ID
     
     if message.from_user.id != ADMIN_ID:
         await message.answer("❌ У вас нет доступа к этой команде")
